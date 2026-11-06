@@ -14,7 +14,7 @@ from citerag.errors import BudgetExceededError, ValidationFailedError
 from citerag.ingest import images as images_module
 from citerag.ingest.images import FoundImage, ImageStore, caption_text, is_cover, pdf_images
 from citerag.llm.fake import FakeGateway
-from citerag.multimodal.vision import MAX_IMAGE_BYTES, validate_image
+from citerag.multimodal.vision import CAPTION_TIMEOUT_S, MAX_IMAGE_BYTES, caption_image, validate_image
 from citerag.rag.pipeline import Deps, answer_question
 from citerag.schemas import (
     ChatRequest,
@@ -251,3 +251,10 @@ def test_saved_image_keeps_its_type(tmp_path):
 def test_indexed_text_holds_caption_visible_text_and_facts():
     caption = ImageCaption(caption="A chart", visible_text="Q3", image_type="chart", key_facts=["up 10%"])
     assert caption_text(caption) == "A chart\nQ3\nup 10%"
+
+
+def test_a_caption_call_is_capped_at_60_seconds():
+    llm = FakeGateway()
+    llm.queue("caption", ImageCaption(caption="A chart", image_type="chart"))
+    asyncio.run(caption_image(llm, PNG, "image/png"))
+    assert CAPTION_TIMEOUT_S == 60 and llm.calls[0].timeout_s == 60 and llm.calls[0].role == "vision"

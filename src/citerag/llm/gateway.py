@@ -55,6 +55,7 @@ class LLMGateway(Protocol):
         call_name: str,
         request_id: str | None = None,
         max_tokens: int | None = None,
+        timeout_s: float | None = None,
     ) -> StructuredResult[T]: ...
 
 
@@ -72,17 +73,22 @@ def build_client(settings: Settings, role: str) -> ChatOpenAI:
     common = {
         "model": getattr(settings, f"model_{role}"),
         "max_retries": 0,
-        "timeout": settings.llm_timeout_s,
         "max_tokens": settings.llm_max_tokens,
         **sampling,
     }
     if provider_of(settings, role) == "gemini":
         if settings.gemini_api_key is None:
             raise LLMUnavailableError(f"role {role} uses gemini, but GEMINI_API_KEY is not set")
-        return ChatOpenAI(base_url=settings.gemini_base_url, api_key=settings.gemini_api_key, **common)
+        return ChatOpenAI(
+            base_url=settings.gemini_base_url,
+            api_key=settings.gemini_api_key,
+            timeout=settings.gemini_timeout_s,
+            **common,
+        )
     return ChatOpenAI(
         base_url=settings.openrouter_base_url,
         api_key=settings.openrouter_api_key,
+        timeout=settings.llm_timeout_s,
         default_headers={"HTTP-Referer": settings.openrouter_referer, "X-Title": settings.openrouter_title},
         extra_body={
             "provider": {
@@ -142,12 +148,15 @@ class OpenRouterGateway:
         return self._clients[role]
 
     def _bind(
-        self, role: str, schema: type[BaseModel], method: str, max_tokens: int
+        self, role: str, schema: type[BaseModel], method: str, max_tokens: int, timeout_s: float | None
     ) -> Runnable[LanguageModelInput, AIMessage]:
         llm = self._client(role)
+        limits: dict[str, float] = {"max_tokens": max_tokens}
+        if timeout_s is not None:
+            limits["timeout"] = timeout_s
         if method == "tools":
-            return llm.bind_tools([schema], tool_choice=schema.__name__, max_tokens=max_tokens)
-        return llm.bind(response_format=schema_response_format(schema), max_tokens=max_tokens)
+            return llm.bind_tools([schema], tool_choice=schema.__name__, **limits)
+        return llm.bind(response_format=schema_response_format(schema), **limits)
 
     def _switch_method(self, model: str) -> bool:
         """STRUCTURED_METHOD=auto: move a model from json_schema to tools, once. False when already there."""
@@ -196,13 +205,16 @@ class OpenRouterGateway:
         call_name: str,
         request_id: str | None = None,
         max_tokens: int | None = None,
+        timeout_s: float | None = None,
     ) -> StructuredResult[T]:
+        """timeout_s caps the whole call, retries and waits included, not each attempt."""
         requested = getattr(self._cfg, f"model_{role}")
         provider = provider_of(self._cfg, role)
         self._client(role)  # a missing key fails here, before anything is logged as an attempt
         default_method = "tools" if self._cfg.structured_method == "tools" else "json_schema"
         limit = max_tokens or self._cfg.llm_max_tokens
         content, started = user, time.perf_counter()
+        attempt_limit = self._cfg.gemini_timeout_s if provider == "gemini" else self._cfg.llm_timeout_s
         input_tokens = output_tokens = parse_failures = 0
         shadow_usd = 0.0
         raised_limit = False
@@ -230,8 +242,14 @@ class OpenRouterGateway:
             method = self._methods.get(requested, default_method)
             messages = [SystemMessage(system), HumanMessage(content)]
             began = time.perf_counter()
+            left = None
+            if timeout_s is not None:
+                left = timeout_s - (began - started)
+                if left <= 0:
+                    raise LLMUnavailableError(f"{requested} used its {timeout_s:.0f} s limit ({call_name})")
+                left = min(left, attempt_limit)
             try:
-                raw = await self._bind(role, schema, method, limit).ainvoke(messages)
+                raw = await self._bind(role, schema, method, limit, left).ainvoke(messages)
             except Exception as exc:
                 seen = classify_error(exc)
                 last_kind = (
@@ -241,6 +259,9 @@ class OpenRouterGateway:
                     last_kind = f"unknown:{type(exc).__name__}"
                     logger.warning("%s: unclassified %s from %s", call_name, type(exc).__name__, requested)
                 record(attempt, began, requested, False, http_status=seen.http_status, error_kind=last_kind)
+                if provider == "gemini" and (seen.kind == "timeout" or seen.http_status == 504):
+                    # every attempt counts against a small daily quota, and a hang rarely clears in seconds
+                    raise LLMUnavailableError(f"{requested} timed out; not retried") from exc
                 if seen.kind == "bad_request" and (
                     self._drop_sampling(role, exc) or self._switch_method(requested)
                 ):

@@ -13,6 +13,7 @@ from citerag.prompts import load_prompt
 from citerag.schemas import ImageAnalysis, ImageCaption
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+CAPTION_TIMEOUT_S = 60  # the whole caption, retries included: a stuck caption must not hold an upload
 Captioner = Callable[[bytes, str], StructuredResult[ImageCaption]]
 
 
@@ -62,6 +63,7 @@ async def caption_image(llm: LLMGateway, data: bytes, media_type: str) -> Struct
         system=load_prompt("caption").text,
         user=[image_block(image_b64, media_type), {"type": "text", "text": "Caption this image."}],
         call_name="caption",
+        timeout_s=CAPTION_TIMEOUT_S,
     )
 
 

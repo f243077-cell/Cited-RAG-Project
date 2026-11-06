@@ -2371,13 +2371,14 @@ OPENROUTER_DATA_COLLECTION=allow                 # "deny" avoids providers that 
 # --- Gemini, second provider through its OpenAI-compatible endpoint ---
 GEMINI_API_KEY=
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-GEMINI_MAX_RPM=5                                 # low guess: Google publishes no free-tier numbers, see AI Studio
-GEMINI_MAX_REQUESTS_PER_DAY=20                   # low guess; Google's daily quota resets at midnight Pacific
+GEMINI_TIMEOUT_S=45                              # a timeout is not retried: every attempt counts against the quota
+GEMINI_MAX_RPM=5                                 # owner's AI Studio limit for gemini-3.8-flash: 5 per minute
+GEMINI_MAX_REQUESTS_PER_DAY=18                   # limit is 20 per day, failed requests count; resets at midnight Pacific
 
 # --- Provider per role: openrouter | gemini ---
 PROVIDER_FAST=openrouter
 PROVIDER_STRONG=openrouter
-PROVIDER_VISION=gemini
+PROVIDER_VISION=openrouter
 PROVIDER_JUDGE=openrouter
 
 # --- Models (all exist with the needed capabilities in OpenRouter's list on 2026-11-06; none called yet) ---
@@ -2385,7 +2386,7 @@ PROVIDER_JUDGE=openrouter
 # Needs: vision = image input; fast/strong/judge = structured outputs (response_format) or tool calling.
 MODEL_FAST=nvidia/nemotron-3.5-super-vl:free
 MODEL_STRONG=nvidia/nemotron-3.5-super-vl:free
-MODEL_VISION=your-gemini-flash-model              # id must belong to PROVIDER_VISION
+MODEL_VISION=nvidia/nemotron-3.5-super-vl:free
 MODEL_JUDGE=nvidia/nemotron-3.5-super-vl:free     # stopgap, same as the answerer; a different model reduces self-preference bias
 STRUCTURED_METHOD=auto                           # auto (json_schema, then tools) | json_schema | tools
 

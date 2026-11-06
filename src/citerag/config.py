@@ -26,11 +26,12 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None  # checked when a gemini role makes its first call
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     gemini_max_rpm: int = 5
-    gemini_max_requests_per_day: int = 20
+    gemini_max_requests_per_day: int = 18
+    gemini_timeout_s: float = 45
 
     provider_fast: Provider = "openrouter"
     provider_strong: Provider = "openrouter"
-    provider_vision: Provider = "gemini"
+    provider_vision: Provider = "openrouter"
     provider_judge: Provider = "openrouter"
 
     # Model ids change often, so they have no default in code (F-OPS-7): they come from .env only.

@@ -16,6 +16,8 @@ def test_every_env_example_key_is_a_setting_and_back():
 def test_env_example_loads_with_documented_defaults():
     cfg = Settings(_env_file=EXAMPLE, openrouter_api_key="k")
     assert cfg.llm_max_rpm == 15 and cfg.max_requests_per_day == 40
+    assert cfg.gemini_max_rpm == 5 and cfg.gemini_max_requests_per_day == 18 and cfg.gemini_timeout_s == 45
+    assert cfg.provider_vision == cfg.provider_judge == "openrouter"
     assert cfg.llm_temperature is None and cfg.judge_temperature == 0
     assert cfg.citerag_api_key is None
     assert cfg.min_top_similarity == 0.55 and cfg.cache_threshold == 0.92
@@ -40,3 +42,8 @@ def test_key_is_masked(settings):
 
 def test_paths_follow_data_dir(settings, tmp_path):
     assert settings.logs_db_path == tmp_path / "logs" / "app.sqlite"
+
+
+def test_a_fresh_clone_uses_no_gemini_role():
+    roles = ("fast", "strong", "vision", "judge")
+    assert {Settings.model_fields[f"provider_{role}"].default for role in roles} == {"openrouter"}

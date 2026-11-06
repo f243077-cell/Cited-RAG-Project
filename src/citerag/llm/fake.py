@@ -19,6 +19,7 @@ class FakeCall:
     call_name: str
     request_id: str | None
     max_tokens: int | None
+    timeout_s: float | None = None
 
 
 class FakeGateway:
@@ -40,8 +41,9 @@ class FakeGateway:
         call_name: str,
         request_id: str | None = None,
         max_tokens: int | None = None,
+        timeout_s: float | None = None,
     ) -> StructuredResult[T]:
-        self.calls.append(FakeCall(role, schema, system, user, call_name, request_id, max_tokens))
+        self.calls.append(FakeCall(role, schema, system, user, call_name, request_id, max_tokens, timeout_s))
         if not self._queues[call_name]:
             raise LookupError(f"FakeGateway: nothing queued for {call_name!r}")
         item = self._queues[call_name].popleft()

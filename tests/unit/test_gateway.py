@@ -2,6 +2,8 @@
 
 import asyncio
 import sqlite3
+import time
+import types
 
 import httpx
 import openai
@@ -10,6 +12,7 @@ from pydantic import BaseModel
 
 from citerag.analytics.logs import LogStore
 from citerag.errors import BudgetExceededError, LLMUnavailableError, StructuredOutputError
+from citerag.llm import gateway as gateway_module
 from citerag.llm.gateway import OpenRouterGateway
 from tests.fake_openai_server import FakeOpenRouter
 
@@ -21,9 +24,8 @@ class Reply(BaseModel):
 
 
 def _gateway(settings, srv, **over):
-    cfg = settings.model_copy(
-        update={"openrouter_base_url": srv.base_url, "gemini_base_url": srv.base_url, **over}
-    )
+    urls = {"openrouter_base_url": srv.base_url, "gemini_base_url": srv.base_url}
+    cfg = settings.model_copy(update={**urls, "provider_vision": "gemini", **over})
     waits: list[float] = []
 
     async def sleep(seconds: float) -> None:
@@ -313,3 +315,95 @@ def test_an_image_block_reaches_the_provider_as_a_data_url(settings):
     assert parts[0]["type"] == "image_url"
     assert parts[0]["image_url"]["url"] == "data:image/png;base64,aGk="
     assert parts[1] == {"type": "text", "text": "what is this"}
+
+
+def _timeout_error():
+    return openai.APITimeoutError(httpx.Request("POST", "http://x"))
+
+
+def test_a_gemini_timeout_is_not_retried(settings):
+    with FakeOpenRouter() as srv:
+        gateway, cfg, waits = _gateway(settings, srv)
+    stub = _Stub([_timeout_error()] * 3)
+    gateway._clients["vision"] = stub
+    with pytest.raises(LLMUnavailableError, match="not retried"):
+        _call(gateway, role="vision")
+    assert len(_rows(cfg)) == 1 and waits == []
+
+
+def test_a_gemini_504_counts_as_a_timeout(settings):
+    with FakeOpenRouter() as srv:
+        gateway, cfg, waits = _gateway(settings, srv)
+    gateway._clients["vision"] = _Stub([_status_error(openai.InternalServerError, 504, "deadline")] * 3)
+    with pytest.raises(LLMUnavailableError, match="not retried"):
+        _call(gateway, role="vision")
+    assert len(_rows(cfg)) == 1 and waits == []
+
+
+def test_a_gemini_503_still_retries(settings):
+    with FakeOpenRouter() as srv:
+        gateway, cfg, _ = _gateway(settings, srv)
+    gateway._clients["vision"] = _Stub([_status_error(openai.InternalServerError, 503, "busy")] * 3)
+    with pytest.raises(LLMUnavailableError):
+        _call(gateway, role="vision")
+    assert len(_rows(cfg)) == 3
+
+
+def test_an_openrouter_timeout_still_retries(settings):
+    with FakeOpenRouter() as srv:
+        gateway, cfg, _ = _gateway(settings, srv)
+    gateway._clients["strong"] = _Stub([_timeout_error()] * 3)
+    with pytest.raises(LLMUnavailableError):
+        _call(gateway)
+    assert len(_rows(cfg)) == 3
+
+
+def test_gemini_clients_use_the_gemini_timeout(settings):
+    with FakeOpenRouter() as srv:
+        gateway, _, _ = _gateway(settings, srv)
+    assert gateway._client("vision").request_timeout == 45
+    assert gateway._client("strong").request_timeout == 60
+
+
+class _Recording(_Stub):
+    def __init__(self, errors=()):
+        super().__init__(errors)
+        self.limits = []
+
+    def bind(self, **kw):
+        self.limits.append(kw.get("timeout"))
+        return self
+
+
+def test_a_call_limit_is_the_budget_for_every_attempt(settings, monkeypatch):
+    with FakeOpenRouter() as srv:
+        gateway, cfg, _ = _gateway(settings, srv)
+    now = [0.0]
+
+    async def sleep(_):
+        now[0] += 40
+
+    gateway._sleep = sleep
+    clock = types.SimpleNamespace(perf_counter=lambda: now[0], time=time.time)
+    monkeypatch.setattr(gateway_module, "time", clock)
+    stub = _Recording([_status_error(openai.InternalServerError, 502, "bad")] * 3)
+    gateway._clients["strong"] = stub
+    with pytest.raises(LLMUnavailableError, match="60 s limit"):
+        _call(gateway, timeout_s=60)
+    assert stub.limits == [60, 20] and len(_rows(cfg)) == 2
+
+
+def test_no_call_limit_means_no_timeout_override(settings):
+    with FakeOpenRouter() as srv:
+        gateway, _, _ = _gateway(settings, srv)
+        srv.queue_text(GOOD)
+        _call(gateway)
+    assert "timeout" not in srv.requests[0]
+
+
+def test_a_call_limit_stays_out_of_the_request_body(settings):
+    with FakeOpenRouter() as srv:
+        gateway, _, _ = _gateway(settings, srv)
+        srv.queue_text(GOOD)
+        _call(gateway, timeout_s=30)
+    assert "timeout" not in srv.requests[0]
