@@ -63,7 +63,7 @@ NIST notes that some works may include third-party material under copyright. The
 | uv package cache | 2.1 GB | included above |
 | `BAAI/bge-small-en-v1.5` | 128 MB (llama_index cache) | about 3.5 min |
 | `cross-encoder/ms-marco-MiniLM-L-6-v2` | 88 MB (`~/.cache/huggingface`) | 102 s |
-| Sample corpus | 5.3 MB | under 1 min |
+| Sample corpus | 5.1 MB | under 1 min |
 
 ## Recommendation on OPEN-5
 
