@@ -172,6 +172,15 @@ class LogStore:
     def recent_llm_calls(self, since: float = 0.0, limit: int = 1000) -> list[LLMCallRow]:
         return self._recent("llm_calls", LLMCallRow, since, limit)
 
+    def purge(self, before: float) -> tuple[int, int, int]:
+        """Rows older than `before`. Returns (requests, llm_calls, messages) deleted."""
+        with closing(self._connect()) as db, db:
+            counts = [
+                db.execute(f"DELETE FROM {table} WHERE ts < ?", (before,)).rowcount
+                for table in ("requests", "llm_calls", "messages")
+            ]
+        return counts[0], counts[1], counts[2]
+
     def delete_session(self, session_id: str) -> None:
         with closing(self._connect()) as db, db:
             db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))

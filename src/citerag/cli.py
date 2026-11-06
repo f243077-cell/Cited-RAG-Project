@@ -21,6 +21,8 @@ eval_app = typer.Typer(no_args_is_help=True, help="Measure retrieval and answers
 app.add_typer(eval_app, name="eval")
 cache_app = typer.Typer(no_args_is_help=True, help="Inspect or empty the semantic cache.")
 app.add_typer(cache_app, name="cache")
+logs_app = typer.Typer(no_args_is_help=True, help="Manage the local request log.")
+app.add_typer(logs_app, name="logs")
 
 
 @app.callback()
@@ -303,6 +305,31 @@ def eval_gate(run_id: str) -> None:
             f"Proposal: {best.tau:.2f}, the highest with no false refusal. It stops "
             f"{best.gate_refusals} of {len(unanswerable)} unanswerable items. Set MIN_TOP_SIMILARITY yourself."
         )
+
+
+@app.command()
+def quota() -> None:
+    """LLM requests in the last 24 hours against each daily guard. Reads the local log: zero LLM requests."""
+    from citerag.llm.budget import requests_last_24h
+
+    settings = get_settings()
+    limits = {"openrouter": settings.max_requests_per_day, "gemini": settings.gemini_max_requests_per_day}
+    for provider, limit in limits.items():
+        typer.echo(f"{provider}: {requests_last_24h(settings.logs_db_path, provider=provider)} of {limit}")
+
+
+@logs_app.command("purge")
+def logs_purge(
+    days: Annotated[int, typer.Option(min=1, help="Keep this many days. The guard needs the last one")] = 30,
+) -> None:
+    """Delete request, LLM-call and message rows older than this many days (ARCHITECTURE section 18)."""
+    import time
+
+    from citerag.analytics.logs import LogStore
+
+    log = LogStore(get_settings().logs_db_path)
+    requests, calls, messages = log.purge(time.time() - days * 86_400)
+    typer.echo(f"Deleted {requests} requests, {calls} LLM calls, {messages} messages")
 
 
 @cache_app.command("stats")
