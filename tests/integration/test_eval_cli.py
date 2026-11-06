@@ -41,6 +41,12 @@ def test_report_prints_counts_and_saves_a_run(run, tmp_path):
     assert saved["before_rerank"]["n_scored"] == 1 and saved["config"]["chunk_size"] == 512
 
 
+def test_skip_type_leaves_items_out(run):
+    result = run("--skip-type", "unanswerable")
+    assert result.exit_code == 0, result.output
+    assert "u-1" not in result.output and "a-1" in result.output
+
+
 def test_require_verified_stops_a_draft_set(run):
     result = run("--require-verified")
     assert result.exit_code == 1 and "validation_error" in result.output

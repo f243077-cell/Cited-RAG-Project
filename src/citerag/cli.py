@@ -77,6 +77,7 @@ def eval_retrieval(
     index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
     rerank: Annotated[bool, typer.Option(help="Also score the list after the cross-encoder")] = False,
     require_verified: Annotated[bool, typer.Option(help="Refuse items no human has verified")] = False,
+    skip_type: Annotated[list[str] | None, typer.Option(help="Leave out an item type, e.g. image")] = None,
 ) -> None:
     """hit@k and MRR on a golden file. Uses zero LLM requests."""
     from citerag.eval.golden import load_golden
@@ -89,6 +90,7 @@ def eval_retrieval(
     target = index_dir or settings.index_dir
     try:
         items = load_golden(golden, require_verified=require_verified)
+        items = [item for item in items if item.type not in (skip_type or [])]
         manifest = load_manifest(target)
         if manifest is None or not manifest.docs:
             raise ValidationFailedError(f"no index at {target}: ingest documents first")
