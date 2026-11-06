@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from citerag.eval.metrics import is_hit, percentile
 from citerag.schemas import AnswerSummary, ItemRecord, Rate
 
-ANSWER_TYPES = {"answerable", "multi_chunk"}
+ANSWER_TYPES = {"answerable", "multi_chunk", "image"}
 
 
 def rate(n: int, of: int) -> Rate:

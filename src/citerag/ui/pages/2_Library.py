@@ -24,7 +24,17 @@ if uploaded and st.button("Ingest"):
 
 if report := st.session_state.get("last_report"):
     st.subheader("Ingest report")
-    columns = ["doc_name", "status", "pages", "chunks", "images_found", "duration_ms"]
+    columns = [
+        "doc_name",
+        "status",
+        "pages",
+        "chunks",
+        "images_found",
+        "images_captioned",
+        "images_skipped",
+        "caption_requests",
+        "duration_ms",
+    ]
     st.dataframe(pd.DataFrame([r.model_dump() for r in report])[columns], hide_index=True)
 
 st.subheader("Documents")

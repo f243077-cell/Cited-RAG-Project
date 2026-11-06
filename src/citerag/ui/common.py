@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from citerag.config import UISettings
@@ -37,6 +39,8 @@ def render_answer(response: ChatResponse) -> None:
         st.warning(warning)
     for citation in response.answer.citations:
         with st.expander(citation_label(citation)):
+            if citation.image_path and Path(citation.image_path).is_file():  # F-MM-4
+                st.image(citation.image_path, width=320)
             st.text(citation.quote)
             if not citation.valid:
                 st.caption(f"Quote not found in the passage (match {citation.match_score:.0f} of 100)")

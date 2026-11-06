@@ -1,7 +1,8 @@
-"""Chat page (F-UI-1). Image input, Deep mode and the cache toggle arrive with M5, M7 and M6."""
+"""Chat page (F-UI-1). Deep mode and the cache toggle arrive with M7 and M6."""
 
 from __future__ import annotations
 
+import base64
 import uuid
 
 import streamlit as st
@@ -37,15 +38,33 @@ with st.sidebar:
 for turn in state.history:
     with st.chat_message(turn["role"]):
         if turn["role"] == "user":
+            if turn.get("image"):
+                st.image(turn["image"], caption="Your image", width=240)
             st.markdown(turn["text"])
         else:
             common.render_answer(turn["response"])
 
-if question := st.chat_input("Ask about your documents"):
-    state.history.append({"role": "user", "text": question})
+submitted = st.chat_input(
+    "Ask about your documents, or attach an image", accept_file=True, file_type=["png", "jpg", "jpeg", "webp"]
+)
+if submitted:
+    upload = submitted.files[0] if submitted.files else None
+    picture = upload.getvalue() if upload else None
+    question = submitted.text or "What does this image show?"
+    state.history.append({"role": "user", "text": question, "image": picture})
     with st.chat_message("user"):
+        if picture:
+            st.image(picture, caption="Your image", width=240)
         st.markdown(question)
-    request = ChatRequest(session_id=state.session_id, message=question, doc_ids=selected or None)
+    image_fields = {}
+    if upload:
+        image_fields = {
+            "image_b64": base64.b64encode(picture).decode("ascii"),
+            "image_media_type": "image/jpeg" if upload.type == "image/jpg" else upload.type,
+        }
+    request = ChatRequest(
+        session_id=state.session_id, message=question, doc_ids=selected or None, **image_fields
+    )
     with st.chat_message("assistant"):
         try:
             with st.spinner("Searching and checking citations"):

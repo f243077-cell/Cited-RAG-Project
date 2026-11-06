@@ -6,6 +6,7 @@ item a full timeout and three daily-guard slots. Only an unusable reply for one 
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -32,6 +33,8 @@ from citerag.rag.verify import Passage
 from citerag.schemas import ChatRequest, GoldenItem, ItemRecord, RetrievalScores
 
 WORST_ANSWER_REQUESTS = 3  # rewrite, generate, regenerate; a first turn has no condense
+WORST_IMAGE_REQUESTS = 5  # adds image analysis and condense
+_MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 _SECRETS = {"openrouter_api_key", "gemini_api_key", "citerag_api_key"}
 _FINGERPRINT = ("model_fast", "model_strong", "model_judge", "provider_strong", "provider_judge")
 
@@ -134,6 +137,16 @@ def _base_record(item: GoldenItem, **fields: object) -> ItemRecord:
     )
 
 
+def _image_fields(item: GoldenItem) -> dict[str, str]:
+    if item.image_path is None:
+        return {}
+    path = Path(item.image_path)
+    return {
+        "image_b64": base64.b64encode(path.read_bytes()).decode("ascii"),
+        "image_media_type": _MEDIA_TYPES[path.suffix.lower()],
+    }
+
+
 async def _answer_item(item: GoldenItem, deps: Deps, run_id: str) -> ItemRecord:
     seen: dict[str, str | list[str]] = {"context": "", "retrieved": []}
 
@@ -142,9 +155,8 @@ async def _answer_item(item: GoldenItem, deps: Deps, run_id: str) -> ItemRecord:
 
     deps.observe = observe
     session = f"eval-{run_id}-{item.id}-{uuid.uuid4().hex[:8]}"  # no history crosses items or resumes
-    response = await answer_question(
-        ChatRequest(session_id=session, message=item.question, use_cache=False), deps
-    )
+    request = ChatRequest(session_id=session, message=item.question, use_cache=False, **_image_fields(item))
+    response = await answer_question(request, deps)
     return _base_record(
         item,
         status="answered",
@@ -176,7 +188,7 @@ async def run_items(
     for item in items:
         record = records.get(item.id)
         if record is None or record.status == "error":
-            if over_cap(WORST_ANSWER_REQUESTS):
+            if over_cap(WORST_IMAGE_REQUESTS if item.image_path else WORST_ANSWER_REQUESTS):
                 return result("paused", f"--max-requests {max_requests} reached")
             try:
                 record = await _answer_item(item, deps, run_dir.name)

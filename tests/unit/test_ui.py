@@ -1,10 +1,15 @@
 """Streamlit pages through AppTest with a stub client, plus the HTTP client against a mock transport."""
 
+import base64
+import io
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
+import streamlit as st
+from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 from citerag.schemas import (
@@ -170,3 +175,48 @@ def test_warnings_stay_visible_after_the_next_rerun(monkeypatch):
     app.chat_input[0].set_value("how long?").run()
     app.run()
     assert len(app.warning) == 1
+
+
+def png_bytes():
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def test_an_image_citation_shows_its_thumbnail(monkeypatch, tmp_path):
+    picture = tmp_path / "figure.png"
+    picture.write_bytes(png_bytes())
+    reply = response()
+    reply.answer.citations[0].kind = "image"
+    reply.answer.citations[0].image_path = str(picture)
+    app = run_page(monkeypatch, "1_Chat.py", StubClient(reply))
+    app.chat_input[0].set_value("show me").run()
+    assert not app.exception and app.expander[0].get("image")
+
+
+def test_a_missing_thumbnail_file_still_shows_the_quote(monkeypatch):
+    reply = response()
+    reply.answer.citations[0].image_path = "data/images/gone.png"
+    app = run_page(monkeypatch, "1_Chat.py", StubClient(reply))
+    app.chat_input[0].set_value("show me").run()
+    assert not app.exception and not app.expander[0].get("image")
+
+
+def test_an_attached_image_is_sent_as_base64_and_shown_as_your_image(monkeypatch):
+    data = png_bytes()
+    upload = SimpleNamespace(getvalue=lambda: data, type="image/png")
+    submitted = SimpleNamespace(text="what is this?", files=[upload])
+    monkeypatch.setattr(st, "chat_input", lambda *a, **k: submitted)
+    client = StubClient(response())
+    app = run_page(monkeypatch, "1_Chat.py", client)
+    assert not app.exception
+    sent = client.requests[0]
+    assert base64.b64decode(sent.image_b64) == data and sent.image_media_type == "image/png"
+
+
+def test_an_image_with_no_text_gets_a_default_question(monkeypatch):
+    upload = SimpleNamespace(getvalue=png_bytes, type="image/png")
+    monkeypatch.setattr(st, "chat_input", lambda *a, **k: SimpleNamespace(text="", files=[upload]))
+    client = StubClient(response())
+    run_page(monkeypatch, "1_Chat.py", client)
+    assert client.requests[0].message == "What does this image show?"
