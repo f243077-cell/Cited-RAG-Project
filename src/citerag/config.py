@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     provider_fast: Provider = "openrouter"
     provider_strong: Provider = "openrouter"
     provider_vision: Provider = "gemini"
-    provider_judge: Provider = "gemini"
+    provider_judge: Provider = "openrouter"
 
     # Model ids change often, so they have no default in code (F-OPS-7): they come from .env only.
     model_fast: str

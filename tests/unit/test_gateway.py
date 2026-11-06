@@ -160,9 +160,9 @@ def test_gemini_roles_use_the_gemini_endpoint_without_openrouter_extras(settings
     with FakeOpenRouter() as srv:
         gateway, cfg, _ = _gateway(settings, srv)
         srv.queue_text(GOOD)
-        _call(gateway, role="judge")
+        _call(gateway, role="vision")
         body, headers = srv.requests[0], srv.headers[0]
-    assert body["model"] == "other/judge:free" and "provider" not in body
+    assert body["model"] == "vendor/vision:free" and "provider" not in body
     assert "x-title" not in headers and "http-referer" not in headers
     assert headers["authorization"] == "Bearer test-gemini-key"
     assert _rows(cfg)[0]["provider"] == "gemini"
@@ -170,11 +170,11 @@ def test_gemini_roles_use_the_gemini_endpoint_without_openrouter_extras(settings
 
 def test_a_role_can_move_provider_by_config(settings):
     with FakeOpenRouter() as srv:
-        gateway, cfg, _ = _gateway(settings, srv, provider_strong="gemini", provider_judge="openrouter")
+        gateway, cfg, _ = _gateway(settings, srv, provider_strong="gemini", provider_vision="openrouter")
         srv.queue_text(GOOD)
         srv.queue_text(GOOD)
         _call(gateway, role="strong")
-        _call(gateway, role="judge")
+        _call(gateway, role="vision")
     assert [r["provider"] for r in _rows(cfg)] == ["gemini", "openrouter"]
 
 
@@ -183,7 +183,7 @@ def test_each_provider_has_its_own_daily_guard(settings):
         gateway, _, _ = _gateway(settings, srv, gemini_max_requests_per_day=1, max_requests_per_day=2)
         srv.queue_text(GOOD)
         srv.queue_text(GOOD)
-        _call(gateway, role="judge")
+        _call(gateway, role="vision")
         with pytest.raises(BudgetExceededError, match="gemini"):
             _call(gateway, role="vision")
         _call(gateway, role="strong")  # gemini at its limit does not block openrouter
@@ -196,7 +196,7 @@ def test_each_provider_has_its_own_rate_limiter(settings):
         srv.queue_text(GOOD)
         srv.queue_text(GOOD)
         srv.queue_text(GOOD)
-        _call(gateway, role="judge")
+        _call(gateway, role="vision")
         _call(gateway, role="strong")
         assert waits == []  # a full gemini window does not hold back openrouter
 
@@ -213,7 +213,7 @@ def test_missing_gemini_key_names_the_setting_and_makes_no_request(settings):
     with FakeOpenRouter() as srv:
         gateway, _, _ = _gateway(settings, srv, gemini_api_key=None)
         with pytest.raises(LLMUnavailableError, match="GEMINI_API_KEY"):
-            _call(gateway, role="judge")
+            _call(gateway, role="vision")
     assert srv.requests == []
 
 
@@ -254,11 +254,11 @@ def test_bad_request_moves_to_tools_then_stops(settings):
 def test_rejected_key_fails_at_once_without_echoing_it(settings):
     with FakeOpenRouter() as srv:
         gateway, _, _ = _gateway(settings, srv)
-    gateway._clients["judge"] = _Stub(
+    gateway._clients["vision"] = _Stub(
         [_status_error(openai.AuthenticationError, 401, "bad key test-gemini-key")]
     )
     with pytest.raises(LLMUnavailableError, match="GEMINI_API_KEY") as caught:
-        _call(gateway, role="judge")
+        _call(gateway, role="vision")
     assert "test-gemini-key" not in caught.value.message
 
 
@@ -267,8 +267,8 @@ def test_a_rejected_temperature_is_dropped_once(settings):
         gateway, cfg, _ = _gateway(settings, srv)
         srv.queue_text(GOOD)
         error = _status_error(openai.BadRequestError, 400, "temperature is not supported")
-        gateway._clients["judge"] = _Stub([error], temperature=0.0)
-        assert _call(gateway, role="judge").requests == 2
+        gateway._clients["vision"] = _Stub([error], temperature=0.0)
+        assert _call(gateway, role="vision").requests == 2
     assert "temperature" not in srv.requests[0]
     assert [r["ok"] for r in _rows(cfg)] == [0, 1]
 
@@ -279,5 +279,15 @@ def test_daily_count_on_health_stays_on_openrouter(settings):
     with FakeOpenRouter() as srv:
         gateway, cfg, _ = _gateway(settings, srv)
         srv.queue_text(GOOD)
-        _call(gateway, role="judge")
+        _call(gateway, role="vision")
     assert requests_last_24h(cfg.logs_db_path, provider="openrouter") == 0
+
+
+def test_an_unclassified_failure_names_the_exception_type_without_its_text(settings):
+    with FakeOpenRouter() as srv:
+        gateway, cfg, _ = _gateway(settings, srv)
+    gateway._clients["strong"] = _Stub([RuntimeError("prompt text that must not be logged")])
+    with pytest.raises(LLMUnavailableError, match="RuntimeError") as caught:
+        _call(gateway)
+    assert "prompt text" not in caught.value.message
+    assert _rows(cfg)[0]["error_kind"] == "unknown:RuntimeError"

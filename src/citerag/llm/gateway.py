@@ -178,7 +178,8 @@ class OpenRouterGateway:
         if seen.kind == "credits" and not seen.retry:
             raise LLMUnavailableError(f"{provider} reports insufficient credits") from exc
         if not seen.retry:
-            raise LLMUnavailableError(f"{model} failed: {seen.kind} (HTTP {seen.http_status})") from exc
+            detail = f"{seen.kind}, {type(exc).__name__}, HTTP {seen.http_status}"
+            raise LLMUnavailableError(f"{model} failed ({detail})") from exc
         if seen.retry_after_s is not None and seen.retry_after_s > _MAX_RETRY_AFTER_S:
             raise LLMUnavailableError(f"{model} is rate limited for {seen.retry_after_s:.0f} s") from exc
         if seen.http_status == 503 and any(text in str(exc).lower() for text in _NO_PROVIDER):
@@ -236,6 +237,9 @@ class OpenRouterGateway:
                 last_kind = (
                     "rate_limit" if seen.http_status == 429 else seen.kind
                 )  # a 429 can arrive in a 200 body
+                if seen.kind == "unknown":  # only the type: an exception message can echo prompt text
+                    last_kind = f"unknown:{type(exc).__name__}"
+                    logger.warning("%s: unclassified %s from %s", call_name, type(exc).__name__, requested)
                 record(attempt, began, requested, False, http_status=seen.http_status, error_kind=last_kind)
                 if seen.kind == "bad_request" and (
                     self._drop_sampling(role, exc) or self._switch_method(requested)

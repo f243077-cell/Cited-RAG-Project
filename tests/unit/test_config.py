@@ -18,7 +18,7 @@ def test_env_example_loads_with_documented_defaults():
     assert cfg.llm_max_rpm == 15 and cfg.max_requests_per_day == 40
     assert cfg.llm_temperature is None and cfg.judge_temperature == 0
     assert cfg.citerag_api_key is None
-    assert cfg.min_top_similarity == 0.30 and cfg.cache_threshold == 0.92
+    assert cfg.min_top_similarity == 0.55 and cfg.cache_threshold == 0.92
     assert cfg.cors_origin_list == ["http://localhost:8501"]
 
 
