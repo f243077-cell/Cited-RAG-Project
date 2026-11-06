@@ -15,6 +15,7 @@ from citerag import errors
 from citerag.api.routers import health
 from citerag.cache.base import NoOpCache
 from citerag.config import Settings, get_settings
+from citerag.ingest.manifest import check_manifest, load_manifest
 
 logger = logging.getLogger(__name__)
 _BY_HTTP_STATUS: dict[int, type[errors.CiteRAGError]] = {
@@ -30,7 +31,11 @@ def _error_response(error: errors.CiteRAGError) -> JSONResponse:
 def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.settings = settings or get_settings()  # a missing required setting stops start-up here
+        cfg = settings or get_settings()  # a missing required setting stops start-up here
+        manifest = load_manifest(cfg.index_dir)
+        if manifest is not None:
+            check_manifest(manifest, cfg)  # F-ING-4: never serve vectors built with other settings
+        app.state.settings = cfg
         app.state.cache = NoOpCache()
         yield
 

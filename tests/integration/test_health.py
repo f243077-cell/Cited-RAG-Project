@@ -1,8 +1,10 @@
+import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 from citerag.api.main import create_app
-from citerag.errors import BudgetExceededError
+from citerag.errors import BudgetExceededError, IndexMismatchError
+from citerag.ingest.manifest import current_namespace, new_manifest, save_manifest
 from citerag.schemas import ErrorResponse
 
 
@@ -19,7 +21,7 @@ def test_health_reports_the_m0_fields(settings):
     assert {"fastapi", "pydantic", "llama-index-core", "chromadb", "crewai", "python"} <= set(
         body["versions"]
     )
-    assert body["manifest"] is None and body["namespace"] is None  # filled from M1
+    assert body["manifest"] is None and body["namespace"] is None  # nothing ingested yet
     assert body["cache"] == {"backend": "noop", "enabled": False, "entries": 0}
     assert body["llm_requests_24h"] == 0 and body["max_requests_per_day"] == 40
 
@@ -52,6 +54,22 @@ def test_typed_errors_use_the_uniform_body(settings):
     assert ErrorResponse.model_validate(crashed.json()).error.code == "internal_error"
     assert missing.status_code == 404
     assert ErrorResponse.model_validate(missing.json()).error.code == "not_found"
+
+
+def test_health_shows_manifest_and_namespace_after_ingest(settings):
+    manifest = new_manifest(settings, embedding_dim=128)
+    save_manifest(settings.index_dir, manifest)
+    with _client(settings) as client:
+        body = client.get("/health").json()
+    assert body["manifest"]["embedding_dim"] == 128
+    assert body["namespace"] == current_namespace(settings, manifest)
+
+
+def test_startup_refuses_an_index_built_with_other_settings(settings):
+    save_manifest(settings.index_dir, new_manifest(settings, embedding_dim=128))
+    changed = settings.model_copy(update={"chunk_size": 256})
+    with pytest.raises(IndexMismatchError), _client(changed):
+        pass
 
 
 def test_openapi_docs_are_served(settings):

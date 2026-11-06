@@ -72,6 +72,10 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
+    def index_dir(self) -> Path:
+        return self.data_dir / "index"
+
+    @property
     def logs_db_path(self) -> Path:
         return self.data_dir / "logs" / "app.sqlite"
 

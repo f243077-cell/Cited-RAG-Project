@@ -111,6 +111,9 @@ class IngestReport(BaseModel):
     images_found: int = 0
     images_captioned: int = 0
     images_skipped: int = 0
+    caption_requests: int = 0  # LLM requests spent on captions (the free-tier quota unit)
+    caption_input_tokens: int = 0
+    caption_output_tokens: int = 0
     caption_cost_usd: float = 0.0
     duration_ms: int = 0
 

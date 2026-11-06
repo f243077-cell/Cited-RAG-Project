@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from citerag.api.deps import get_app_settings, get_cache
 from citerag.cache.base import CacheBackend, CacheStats
 from citerag.config import Settings
+from citerag.ingest.manifest import Manifest, current_namespace, load_manifest
 from citerag.llm.budget import requests_last_24h
 
 router = APIRouter()
@@ -31,8 +32,8 @@ _PACKAGES = (
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     versions: dict[str, str]
-    manifest: dict | None = None  # the index manifest, from M1
-    namespace: str | None = None  # the cache namespace, from M1
+    manifest: Manifest | None = None  # None until the first ingest
+    namespace: str | None = None
     cache: CacheStats
     llm_requests_24h: int
     max_requests_per_day: int
@@ -53,8 +54,11 @@ def health(
     settings: Annotated[Settings, Depends(get_app_settings)],
     cache: Annotated[CacheBackend, Depends(get_cache)],
 ) -> HealthResponse:
+    manifest = load_manifest(settings.index_dir)  # the file only: the API does not open Chroma for this
     return HealthResponse(
         versions=_versions(),
+        manifest=manifest,
+        namespace=current_namespace(settings, manifest) if manifest else None,
         cache=cache.stats(),
         llm_requests_24h=requests_last_24h(settings.logs_db_path),
         max_requests_per_day=settings.max_requests_per_day,
