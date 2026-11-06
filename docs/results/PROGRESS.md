@@ -22,7 +22,7 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 
 ## M8
 
-**Done:** `Dockerfile`, `docker-compose.yml`, `.dockerignore`, request guard tests against the real gateway, `citerag quota`, `citerag logs purge`, README with diagram and provisional results, `security_checklist.md`, `M8_test_guide.md`. A fresh clone on C: passed install, `citerag version`, the test suite with no key after the fix below, ingestion, `/health` and the Streamlit health check.
+**Done:** `Dockerfile`, `docker-compose.yml`, `.dockerignore`, request guard tests against the real gateway, `citerag quota`, `citerag logs purge`, README with diagram and provisional results, `security_checklist.md`, `M8_test_guide.md`. A fresh clone on C: passed install, `citerag version`, `/health` and the Streamlit health check, and 529 of 530 tests with no key. A second clone with the fix below passed `test_chunking.py` and a multi-chunk ingest; the full suite was not repeated in a clone, but it passes 530 of 530 in the repo.
 
 **Found by the clone:** uv hard-links packages when its cache shares a drive with the project, and NLTK refuses hard-linked data, so chunking crashed. `[tool.uv] link-mode = "copy"` fixes it.
 
