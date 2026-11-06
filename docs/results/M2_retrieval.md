@@ -10,7 +10,7 @@ uv run citerag eval retrieval --rerank --skip-type image --index-dir data/index_
 
 **These numbers are provisional.** The 43 items in `eval/golden/candidates.jsonl` are drafts with `verified: false`. No human has checked them, so they are not a golden set and must not be quoted as results. The questions were also written from the text they point to, which flatters any retriever.
 
-Setup: 10 documents, 294 chunks, `BAAI/bge-small-en-v1.5`, chunk size 512, overlap 64, `TOP_K_RETRIEVE` 20, `TOP_K_CONTEXT` 5.
+Setup: 11 files (10 with text, plus the whiteboard PNG with no chunks until M5), 294 chunks, `BAAI/bge-small-en-v1.5`, chunk size 512, overlap 64, `TOP_K_RETRIEVE` 20, `TOP_K_CONTEXT` 5.
 
 ## Draft set
 
