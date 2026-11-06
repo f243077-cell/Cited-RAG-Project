@@ -8,8 +8,11 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 from llama_index.core import Settings as LlamaSettings
 from llama_index.core import StorageContext, VectorStoreIndex, load_index_from_storage
+from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.schema import TextNode
+from llama_index.core.storage.docstore.types import BaseDocumentStore
+from llama_index.core.vector_stores import MetadataFilters
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 from citerag.config import Settings
@@ -87,7 +90,24 @@ class IndexStore:
         found = self._collection.get(where={"doc_id": doc_id}, include=["metadatas"])
         return [dict(meta) for meta in found["metadatas"]]
 
-    def top_cosine(self, query_embedding: list[float]) -> float:
-        """True cosine of the best hit: LlamaIndex's score is exp(-distance), not cosine (F-RET-4)."""
-        found = self._collection.query(query_embeddings=[query_embedding], n_results=1, include=["distances"])
-        return 1.0 - found["distances"][0][0]
+    @property
+    def docstore(self) -> BaseDocumentStore:
+        return self._context.docstore
+
+    def vector_retriever(self, top_k: int, filters: MetadataFilters | None = None) -> BaseRetriever:
+        return self._index.as_retriever(similarity_top_k=top_k, filters=filters)
+
+    def embed_query(self, query: str) -> list[float]:
+        return self.embed_model.get_query_embedding(query)
+
+    def top_cosine(self, query_embedding: list[float], doc_ids: list[str] | None = None) -> float:
+        """True cosine of the best hit: LlamaIndex's score is exp(-distance), not cosine (F-RET-4).
+        0.0 when nothing matches, so an empty index or filter never passes the gate."""
+        if doc_ids is not None and not doc_ids:
+            return 0.0
+        where = None if doc_ids is None else {"doc_id": {"$in": doc_ids}}
+        found = self._collection.query(
+            query_embeddings=[query_embedding], n_results=1, where=where, include=["distances"]
+        )
+        distances = found["distances"][0]
+        return 1.0 - distances[0] if distances else 0.0
