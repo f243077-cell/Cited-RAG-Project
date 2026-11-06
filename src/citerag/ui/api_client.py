@@ -67,5 +67,20 @@ class ApiClient:
     def eval_run(self, run_id: str) -> RunDetail:
         return RunDetail.model_validate_json(self._send("GET", f"/v1/eval/runs/{run_id}").text)
 
+    def cache_status(self) -> dict:
+        return self._send("GET", "/v1/cache/stats").json()
+
+    def clear_cache(self) -> None:
+        self._send("POST", "/v1/cache/clear")
+
+    def request_log(self, limit: int = 1000) -> list[dict]:
+        return self._send("GET", "/v1/logs/requests", params={"limit": limit}).json()
+
+    def llm_call_log(self, limit: int = 1000) -> list[dict]:
+        return self._send("GET", "/v1/logs/llm_calls", params={"limit": limit}).json()
+
+    def cache_sweep(self) -> dict | None:
+        return self._send("GET", "/v1/eval/cache-sweep").json()
+
     def health(self) -> dict:
         return self._send("GET", "/health").json()

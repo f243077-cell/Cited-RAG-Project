@@ -263,3 +263,95 @@ def test_the_client_sends_the_caption_choice_as_a_form_field():
     _client(handler).upload([("a.md", b"x")])
     _client(handler).upload([("a.md", b"x")], captions=True)
     assert b'name="captions"' in seen[0] and b"false" in seen[0] and b"true" in seen[1]
+
+
+def log_rows():
+    base = dict.fromkeys(
+        (
+            "lat_condense",
+            "lat_embed",
+            "lat_cache",
+            "lat_retrieve",
+            "lat_rerank",
+            "lat_generate",
+            "lat_verify",
+        ),
+        5,
+    )
+    return [
+        {**base, "message": "q1", "cache_enabled": True, "cache_hit": False, "cache_similarity": 0.4,
+         "llm_requests": 1, "saved_requests": None, "lat_total": 900, "error_code": None},
+        {**base, "message": "q2", "cache_enabled": True, "cache_hit": True, "cache_similarity": 0.97,
+         "llm_requests": 0, "saved_requests": 1, "lat_total": 20, "error_code": None},
+    ]  # fmt: skip
+
+
+class DashboardClient(StubClient):
+    rows = None
+    sweep = None
+    cleared = False
+
+    def request_log(self, limit=1000):
+        return self.rows if self.rows is not None else log_rows()
+
+    def llm_call_log(self, limit=1000):
+        return [{"role": "generate", "input_tokens": 10, "output_tokens": 5}]
+
+    def cache_status(self):
+        return {"backend": "semantic", "enabled": True, "entries": 3, "threshold": 0.92}
+
+    def cache_sweep(self):
+        return self.sweep
+
+    def clear_cache(self):
+        self.cleared = True
+
+
+def test_the_dashboard_shows_hits_and_savings_from_the_log(monkeypatch):
+    st.cache_data.clear()
+    app = run_page(monkeypatch, "3_Dashboard.py", DashboardClient())
+    assert not app.exception
+    text = " ".join(m.value for m in app.markdown)
+    assert "2 requests" in text and "1 cache hits of 2 lookups" in text and "1 LLM requests saved" in text
+    assert "threshold 0.92" in " ".join(c.value for c in app.caption)
+
+
+def test_the_dashboard_says_when_there_is_no_sweep_or_no_request(monkeypatch):
+    st.cache_data.clear()
+    app = run_page(monkeypatch, "3_Dashboard.py", DashboardClient())
+    assert any("No threshold sweep" in i.value for i in app.info)
+    st.cache_data.clear()
+    client = DashboardClient()
+    client.rows = []
+    app = run_page(monkeypatch, "3_Dashboard.py", client)
+    assert not app.exception and any("No requests yet" in i.value for i in app.info)
+
+
+def test_the_dashboard_can_clear_the_cache(monkeypatch):
+    st.cache_data.clear()
+    client = DashboardClient()
+    app = run_page(monkeypatch, "3_Dashboard.py", client)
+    next(b for b in app.button if b.label == "Clear cache").click().run()
+    assert client.cleared
+
+
+def test_the_cache_toggle_is_on_by_default_and_turns_the_cache_off_for_a_question(monkeypatch):
+    client = StubClient(response())
+    app = run_page(monkeypatch, "1_Chat.py", client)
+    assert app.toggle[0].label == "Use cache" and app.toggle[0].value is True
+    app.toggle[0].set_value(False).run()
+    app.chat_input[0].set_value("q").run()
+    assert client.requests[-1].use_cache is False
+
+
+def test_a_cached_answer_shows_the_badge_with_its_similarity(monkeypatch):
+    reply = response()
+    reply.cache = CacheInfo(enabled=True, hit=True, similarity=0.967, matched_query="m", saved_requests=1)
+    app = run_page(monkeypatch, "1_Chat.py", StubClient(reply))
+    app.chat_input[0].set_value("q").run()
+    captions = " ".join(c.value for c in app.caption)
+    assert (
+        "Served from cache" in captions
+        and "similarity 0.97" in captions
+        and "1 LLM requests saved" in captions
+    )

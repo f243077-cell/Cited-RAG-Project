@@ -12,6 +12,7 @@ st.title("CiteRAG")
 st.write("Ask questions about your own documents and get answers with checked citations.")
 st.page_link("pages/1_Chat.py", label="Chat")
 st.page_link("pages/2_Library.py", label="Library")
+st.page_link("pages/3_Dashboard.py", label="Dashboard")
 
 try:
     health = common.get_client().health()

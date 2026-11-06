@@ -33,6 +33,14 @@ def usage_line(response: ChatResponse) -> str:
     )
 
 
+def cache_line(response: ChatResponse) -> str:
+    info = response.cache
+    return (
+        f":material/bolt: Served from cache · similarity {info.similarity:.2f} · "
+        f"{info.saved_requests or 0} LLM requests saved"
+    )
+
+
 def render_answer(response: ChatResponse) -> None:
     st.markdown(response.answer.answer)
     for warning in response.warnings:
@@ -46,4 +54,6 @@ def render_answer(response: ChatResponse) -> None:
                 st.caption(f"Quote not found in the passage (match {citation.match_score:.0f} of 100)")
     if response.answer.answerable:
         st.caption(f"Confidence: {response.answer.confidence}")
+    if response.cache.hit:
+        st.caption(cache_line(response))
     st.caption(usage_line(response))

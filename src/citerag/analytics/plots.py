@@ -3,11 +3,18 @@ Bars carry direct labels and every page shows the same numbers as a table, so no
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 
 from citerag.schemas import ItemRecord
+
+if TYPE_CHECKING:
+    from citerag.eval.bench import BenchSummary
+    from citerag.eval.cache_tools import SweepResult
 
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
@@ -95,3 +102,182 @@ def type_heatmap(frame: pd.DataFrame, title: str = "Scores by question type") ->
         spine.set_visible(False)
     ax.set_title(title, loc="left", color=INK, fontsize=11)
     return fig
+
+
+def _quiet_lines(ax) -> None:
+    """For line charts the grid runs across, so values read against the y axis."""
+    _quiet(ax)
+    ax.grid(axis="x", visible=False)
+    ax.grid(axis="y", color=GRID, linewidth=0.8)
+
+
+def cache_hit_rate(requests: pd.DataFrame, window: int = 20) -> Figure:
+    """Chart 1: rolling hit rate over requests where the cache was on."""
+    rate = requests.cache_hit.astype(float).rolling(window, min_periods=1).mean().to_numpy()
+    fig = _canvas(7.5, 2.8)
+    ax = fig.axes[0]
+    ax.plot(range(1, len(rate) + 1), rate, color=SERIES[0], linewidth=2)
+    ax.set_ylim(0, 1.05)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1], ["0%", "25%", "50%", "75%", "100%"])
+    ax.set_xlabel("Request", color=MUTED, fontsize=9)
+    ax.set_title(f"Cache hit rate, last {window} requests", loc="left", color=INK, fontsize=11)
+    _quiet_lines(ax)
+    return fig
+
+
+def latency_hit_miss(requests: pd.DataFrame) -> Figure:
+    """Chart 2: latency with a log axis, because a hit is often a thousand times faster."""
+    hit = requests.cache_hit.astype(bool)
+    groups = [("Miss", requests.lat_total[~hit]), ("Hit", requests.lat_total[hit])]
+    shown = [(name, values.clip(lower=1)) for name, values in groups if len(values)]
+    fig = _canvas(7.5, 2.8)
+    ax = fig.axes[0]
+    ax.boxplot(
+        [values.to_numpy() for _, values in shown],
+        orientation="horizontal",
+        tick_labels=[f"{name} (n={len(values)})" for name, values in shown],
+        widths=0.5,
+        medianprops={"color": SERIES[1], "linewidth": 2},
+        boxprops={"color": SERIES[0]},
+        whiskerprops={"color": SERIES[0]},
+        capprops={"color": SERIES[0]},
+        flierprops={"markeredgecolor": MUTED, "markersize": 4},
+    )
+    ax.set_xscale("log")
+    ax.set_xlabel("Milliseconds, log scale", color=MUTED, fontsize=9)
+    ax.set_title("Latency, hit vs miss", loc="left", color=INK, fontsize=11)
+    _quiet(ax)
+    return fig
+
+
+def cumulative_requests(requests: pd.DataFrame) -> Figure:
+    """Chart 3: one axis. Shadow dollars read 0 on free models, so the spec's second axis would be empty."""
+    actual = requests.llm_requests.cumsum().to_numpy()
+    without = (requests.llm_requests + requests.saved_requests.fillna(0)).cumsum().to_numpy()
+    places = range(1, len(actual) + 1)
+    fig = _canvas(7.5, 2.8)
+    ax = fig.axes[0]
+    ax.plot(places, without, color=SERIES[1], linewidth=2, label="Without the cache")
+    ax.plot(places, actual, color=SERIES[0], linewidth=2, label="Actual")
+    for values in (without, actual):
+        ax.annotate(f"{values[-1]:.0f}", (places[-1], values[-1]), xytext=(4, 0), textcoords="offset points",
+                    color=MUTED, fontsize=8, va="center")  # fmt: skip
+    ax.set_xlabel("Request", color=MUTED, fontsize=9)
+    ax.set_title("Cumulative LLM requests", loc="left", color=INK, fontsize=11)
+    fig.legend(frameon=False, loc="outside lower left", ncols=2, fontsize=8, labelcolor=MUTED)
+    _quiet_lines(ax)
+    return fig
+
+
+def panel_bars(panels: dict[str, pd.Series], title: str, height: float = 2.8) -> Figure:
+    """Small multiples of labelled bars, one x scale per panel: never two scales on one axis."""
+    fig = Figure(figsize=(7.5, height), layout="constrained", facecolor=SURFACE)
+    axes = fig.subplots(1, len(panels), squeeze=False)[0]
+    for ax, (name, values) in zip(axes, panels.items(), strict=True):
+        ax.set_facecolor(SURFACE)
+        rows = [str(label) for label in values.index]
+        numbers = values.astype(float).to_numpy()
+        ax.barh(rows, numbers, height=0.55, color=SERIES[0])
+        top = float(numbers.max()) if len(numbers) and numbers.max() > 0 else 1.0
+        for row, value in zip(rows, numbers, strict=True):
+            ax.text(value + top * 0.02, row, f"{value:,.0f}", va="center", fontsize=8, color=MUTED)
+        ax.set_xlim(0, top * 1.2)
+        ax.invert_yaxis()
+        ax.set_title(name, loc="left", color=INK, fontsize=10)
+        ax.tick_params(axis="y", labelcolor=INK, labelsize=9)
+        _quiet(ax)
+    fig.suptitle(title, x=0.01, ha="left", color=INK, fontsize=11)
+    return fig
+
+
+def calls_by_role(calls: pd.DataFrame) -> Figure:
+    """Chart 4: tokens and requests are different measures, so each gets its own panel."""
+    frame = calls.assign(tokens=calls.input_tokens + calls.output_tokens)
+    grouped = frame.groupby("role").agg(tokens=("tokens", "sum"), requests=("role", "count"))
+    grouped = grouped.sort_values("requests", ascending=False)
+    return panel_bars(
+        {"LLM requests": grouped.requests, "Tokens": grouped.tokens},
+        "LLM use by call type",
+        1.2 + 0.32 * len(grouped),
+    )
+
+
+_STAGES = {
+    "lat_condense": "Condense",
+    "lat_embed": "Embed",
+    "lat_cache": "Cache",
+    "lat_retrieve": "Retrieve",
+    "lat_rerank": "Rerank",
+    "lat_generate": "Generate",
+    "lat_verify": "Verify",
+}
+
+
+def stage_latency(requests: pd.DataFrame) -> Figure:
+    """Chart 5: mean milliseconds per stage on misses. One hue: the length is the message."""
+    misses = requests[~requests.cache_hit.astype(bool)]
+    means = misses[list(_STAGES)].mean().rename(_STAGES).fillna(0)
+    return panel_bars({"Mean milliseconds": means}, "Latency by stage, misses only", 3.0)
+
+
+def similarity_hist(requests: pd.DataFrame, threshold: float) -> Figure:
+    """Chart 6: how close the misses came. Misses that crowd the line are where the threshold matters."""
+    seen = requests[requests.cache_similarity.notna()]
+    hit = seen.cache_hit.astype(bool)
+    bins = np.linspace(0, 1, 41)
+    fig = _canvas(7.5, 2.8)
+    ax = fig.axes[0]
+    ax.hist(
+        seen.cache_similarity[~hit], bins=bins, color=SERIES[0], alpha=0.75, label="Best similarity of a miss"
+    )
+    ax.hist(seen.cache_similarity[hit], bins=bins, color=SERIES[1], alpha=0.75, label="Similarity of a hit")
+    ax.axvline(threshold, color=INK, linewidth=1.5, linestyle="--")
+    ax.text(threshold, ax.get_ylim()[1], f" threshold {threshold:.2f}", color=INK, fontsize=8, va="top")
+    ax.set_xlabel("Cosine similarity", color=MUTED, fontsize=9)
+    ax.set_title("Similarity of hits and misses", loc="left", color=INK, fontsize=11)
+    fig.legend(frameon=False, loc="outside lower left", ncols=2, fontsize=8, labelcolor=MUTED)
+    _quiet_lines(ax)
+    return fig
+
+
+def threshold_chart_rows(rows: list[dict], chosen: float | None) -> Figure:
+    """Chart 7: three lines on one share axis, with the recommended threshold marked."""
+    frame = pd.DataFrame(rows)
+    fig = _canvas(7.5, 3.2)
+    ax = fig.axes[0]
+    for color, column, name in zip(
+        SERIES,
+        ("precision", "recall", "false_hit_rate"),
+        ("Precision", "Recall", "False-hit rate"),
+        strict=True,
+    ):
+        ax.plot(frame.tau, frame[column], color=color, linewidth=2, label=name)
+    if chosen is not None:
+        ax.axvline(chosen, color=INK, linewidth=1.5, linestyle="--")
+        ax.text(chosen + 0.004, 1.04, f"{chosen:.2f}", color=INK, fontsize=8)
+    ax.set_ylim(0, 1.1)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1], ["0%", "25%", "50%", "75%", "100%"])
+    ax.set_xlabel("Threshold", color=MUTED, fontsize=9)
+    ax.set_title("Cache threshold sweep, guard applied", loc="left", color=INK, fontsize=11)
+    fig.legend(frameon=False, loc="outside lower left", ncols=3, fontsize=8, labelcolor=MUTED)
+    _quiet_lines(ax)
+    return fig
+
+
+def threshold_chart(result: SweepResult) -> Figure:
+    return threshold_chart_rows([row.model_dump() for row in result.rows], result.recommended)
+
+
+def bench_chart(summary: BenchSummary) -> Figure:
+    """E6: cache off vs on, one panel per measure."""
+    off, on = summary.passes["off"], summary.passes["on"]
+    names = ["Cache off", "Cache on"]
+    return panel_bars(
+        {
+            "LLM requests": pd.Series([off.llm_requests, on.llm_requests], index=names),
+            "Latency p95, ms": pd.Series([off.latency_p95_ms or 0, on.latency_p95_ms or 0], index=names),
+            "Judged correct": pd.Series([off.correct.n, on.correct.n], index=names),
+        },
+        f"Cache off vs on, {off.n_items} questions",
+        2.0,
+    )

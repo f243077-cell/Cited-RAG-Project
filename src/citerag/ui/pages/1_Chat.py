@@ -1,4 +1,4 @@
-"""Chat page (F-UI-1). Deep mode and the cache toggle arrive with M7 and M6."""
+"""Chat page (F-UI-1)."""
 
 from __future__ import annotations
 
@@ -27,6 +27,9 @@ with st.sidebar:
         documents = []
     names = {d.doc_id: d.doc_name for d in documents}
     selected = st.multiselect("Search only in", list(names), format_func=names.get)
+    use_cache = st.toggle(
+        "Use cache", value=True, help="Off skips the cache for this question: no lookup and nothing stored."
+    )
     if st.button("New chat"):
         try:
             client.delete_session(state.session_id)
@@ -63,7 +66,11 @@ if submitted:
             "image_media_type": "image/jpeg" if upload.type == "image/jpg" else upload.type,
         }
     request = ChatRequest(
-        session_id=state.session_id, message=question, doc_ids=selected or None, **image_fields
+        session_id=state.session_id,
+        message=question,
+        doc_ids=selected or None,
+        use_cache=use_cache,
+        **image_fields,
     )
     with st.chat_message("assistant"):
         try:
