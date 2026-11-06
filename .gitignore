@@ -1,0 +1,20 @@
+# secrets
+.env
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+*.egg-info/
+# project data (regenerated or private)
+data/
+eval/results/
+*.sqlite
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
