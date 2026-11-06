@@ -576,7 +576,7 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 |---|---|
 | `citerag ingest PATH [--index-dir D] [--via-api]` | Ingest a file or folder |
 | `citerag cache clear` / `cache stats` | Cache admin |
-| `citerag eval retrieval [--golden F] [--rerank] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
+| `citerag eval retrieval [--golden F] [--index-dir D] [--rerank] [--skip-type T] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
 | `citerag eval run --suite golden [--config F] [--offline] [--via-api] [--limit N] [--max-requests N] [--resume RUN_ID] [--llm-disk-cache]` | Score the system; offline = retrieval metrics only, zero LLM requests; runs append to `items.jsonl` item by item so they can resume |
 | `citerag eval compare RUN_A RUN_B` | Delta table |
 | `citerag eval cache-sweep --pairs eval/cache_pairs.jsonl` | Threshold analysis |
@@ -723,6 +723,8 @@ Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.1
 21. **CrewAI asks an interactive question on first run** even with telemetry off: "Share this execution trace with CrewAI? [y/N] (20s timeout)". It blocks for 20 seconds. Set `Crew(tracing=False)` or `CREWAI_TRACING_ENABLED=false`.
 22. **`GET /api/v1/key` lagged or undercounted.** After 5 real attempts `free_model_daily_requests.used` read 3 (an upstream 429 was one of the 5). Trust the local `llm_calls` count, which is stricter.
 23. **BM25 pads its list with score-0 chunks.** Rank fusion credits them as if they matched. Filter them out before fusion (section 8).
+24. **The relevance gate cannot catch on-topic near-misses.** On 7 draft unanswerable items, the 5 near-misses scored cosine 0.65 to 0.77 against 0.70 to 0.88 for answerable items (`docs/results/M2_retrieval.md`). The gate saves requests on off-topic questions; the model must refuse the rest.
+25. **Golden pages are PDF positions, not printed page numbers.** NIST PDFs have front matter, so the two differ. `doc` must equal the stored `doc_name` exactly.
 
 ## Appendix A. Reference code (tested; copy as-is)
 

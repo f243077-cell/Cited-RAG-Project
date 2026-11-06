@@ -1,33 +1,60 @@
 # M2 retrieval report
 
-Date: 2026-11-06. Command: `uv run citerag eval retrieval --rerank`. LLM requests: 0.
+Date: 2026-11-06. LLM requests: 0.
 
-**These numbers are provisional.** The 12 items in `eval/golden/candidates.jsonl` are drafts with `verified: false`. No human has checked them yet, so they are not a golden set and must not be quoted as results. The questions were also written from the text they point to, which flatters any retriever.
+```bash
+uv run citerag ingest data/sample --index-dir data/index_eval
+uv run citerag ingest eval/fixtures/poisoned --index-dir data/index_eval
+uv run citerag eval retrieval --rerank --skip-type image --index-dir data/index_eval
+```
 
-Setup: 6 documents, 290 chunks, `BAAI/bge-small-en-v1.5`, chunk size 512, overlap 64, `TOP_K_RETRIEVE` 20, `TOP_K_CONTEXT` 5.
+**These numbers are provisional.** The 43 items in `eval/golden/candidates.jsonl` are drafts with `verified: false`. No human has checked them, so they are not a golden set and must not be quoted as results. The questions were also written from the text they point to, which flatters any retriever.
 
-| Metric (n=10) | Hybrid | After rerank (20 to 5) |
+Setup: 10 documents, 294 chunks, `BAAI/bge-small-en-v1.5`, chunk size 512, overlap 64, `TOP_K_RETRIEVE` 20, `TOP_K_CONTEXT` 5.
+
+## Draft set
+
+| Type | Items | Note |
 |---|---|---|
-| hit@1 | 6/10 | 8/10 |
-| hit@3 | 7/10 | 9/10 |
-| hit@5 | 9/10 | 10/10 |
-| hit@10 | 10/10 | not applicable |
-| hit@20 | 10/10 | not applicable |
-| MRR | 0.688 (@10) | 0.853 (@5) |
+| answerable | 21 | |
+| multi_chunk | 5 | |
+| unanswerable | 7 | 5 on-topic near-misses, 2 easy controls |
+| injection | 5 | One canary is inside an image, so it needs M5 |
+| image | 5 | Skipped here: they need the M5 image flow |
 
-With about 10 items, one item is 10 points, so this shows nothing firm about rerank. OPEN-2 waits for experiment E3 on the verified set.
+Every gold page was checked against the `page` and `doc_name` stored after ingestion, which is the PDF position from 1, not the printed number.
+
+## Retrieval (answerable and multi_chunk, n=26)
+
+| Metric | Hybrid | After rerank (20 to 5) |
+|---|---|---|
+| hit@1 | 18/26 (69%) | 18/26 (69%) |
+| hit@3 | 21/26 (81%) | 24/26 (92%) |
+| hit@5 | 23/26 (88%) | 25/26 (96%) |
+| hit@10 | 24/26 (92%) | not applicable |
+| hit@20 | 25/26 (96%) | not applicable |
+| MRR | 0.763 (@10) | 0.796 (@5) |
+
+Rerank looks useful at hit@3 and hit@5, but OPEN-2 waits for experiment E3 on the verified set.
+
+Weakest items: `a-017` is missed even at hit@20, and `a-007` ranks 14, behind pages that only mention the title.
+
+For `multi_chunk` items, hit@k counts any one gold source, so a hit does not prove every part was retrieved. M4 should score those items for full coverage.
 
 ## Relevance gate
 
 | Item type | Top cosine |
 |---|---|
-| Answerable (10) | 0.720 to 0.883 |
-| Unanswerable (2) | 0.510 and 0.540 |
+| Answerable and multi_chunk (26) | 0.701 to 0.883 |
+| Unanswerable near-misses (5) | 0.651 to 0.766 |
+| Unanswerable easy controls (2) | 0.510 and 0.635 |
 
-`MIN_TOP_SIMILARITY` stays at the 0.30 placeholder, so neither unanswerable item would be refused by the gate today. M4 calibrates it on the verified unanswerable items.
+**The gate cannot separate near-misses from answerable items:** the ranges overlap. A threshold that refuses them all would also refuse real questions. Refusing them is the model's job (F-ANS-3), so M4 should calibrate the gate low and measure correct refusals on these items. `MIN_TOP_SIMILARITY` stays at the 0.30 placeholder.
 
-## For the human review
+`u-001` scores 0.635 here, up from 0.540 on the demo index, because it matches the poisoned shipping note.
 
-- **a-004** ranks 5 because the top hit, page 31 of `NIST.CSWP.29.pdf`, is the glossary, which also mentions Tiers. Check whether page 31 belongs in its gold sources.
-- **a-007** ranks 7: page 1 of `NIST.SP.800-61r3.pdf` matches the title but does not answer the question.
+## Review notes
+
 - Move an item to `eval/golden/golden.jsonl` with `verified: true` only after checking its question, answer and sources.
+- `a-012`, `a-016` and `v-001` list every page that states the answer, including glossary and list-of-figures pages.
+- `a-005`, `v-005`: pages that merely name the same terms were left out.

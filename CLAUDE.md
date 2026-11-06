@@ -37,7 +37,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run uvicorn citerag.api.main:app --reload --port 8000
 uv run streamlit run src/citerag/ui/app.py
 uv run citerag ingest data/sample         # stop the API first (single-writer Chroma) or add --via-api
-uv run citerag eval retrieval --rerank    # hit@k and MRR on eval/golden/candidates.jsonl, zero LLM requests
+uv run citerag eval retrieval --rerank --skip-type image --index-dir data/index_eval   # hit@k, MRR, zero LLM requests
 uv run python scripts/pick_free_models.py   # list free models by capability and suggest .env lines (M0)
 uv run citerag eval run --suite golden --offline   # retrieval metrics only, zero LLM requests
 uv run citerag eval run --suite golden --max-requests 35 --resume <run_id>   # spread over free-tier days
@@ -120,8 +120,10 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - The embedding model lands in llama_index's cache (`platformdirs.user_cache_dir("llama_index")`), not `~/.cache/huggingface`.
 - OpenRouter's free list has more than chat models: `openrouter/free` (router), `google/lyria-*` (audio output) and `stealth/*` (no
   `:free` suffix) all show price 0. `scripts/pick_free_models.py` filters them.
-- `MIN_TOP_SIMILARITY=0.30` is too low to refuse much: a refund question with no answer in the NIST corpus scored cosine 0.54
-  against it. Calibrate at M4 on the unanswerable items; do not change it by hand before then.
+- **The relevance gate cannot catch on-topic questions the documents do not answer.** Near-miss unanswerables scored cosine 0.65 to
+  0.77 against 0.70 to 0.88 for answerable items, so refusing them is the model's job. Calibrate `MIN_TOP_SIMILARITY` at M4 only.
+- Golden `page` is the stored PDF position from 1 (pypdf), never the printed number; `doc` must equal the stored `doc_name` exactly.
+- About 10 of the 29 images that pass the size filter sit on cover pages. Look at this in M5: each caption is one LLM request.
 - **BM25 pads its results with score-0 chunks** that match no query term, and rank fusion rewards those ranks. Keep the
   `_MatchingBM25` wrapper in `index/retriever.py`.
 - `citerag ingest --via-api` does not exist yet: it needs `POST /v1/documents`, which arrives with the Library page in M3.
