@@ -1,0 +1,3 @@
+name: e2_vector
+retrieval: vector
+index_dir: data/index_eval

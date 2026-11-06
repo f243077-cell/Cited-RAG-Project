@@ -1,0 +1,3 @@
+name: e2_hybrid
+retrieval: hybrid
+index_dir: data/index_eval

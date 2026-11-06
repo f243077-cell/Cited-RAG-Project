@@ -1,0 +1,3 @@
+name: e2_bm25
+retrieval: bm25
+index_dir: data/index_eval

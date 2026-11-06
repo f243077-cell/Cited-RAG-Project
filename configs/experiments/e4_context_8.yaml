@@ -1,0 +1,4 @@
+name: e4_context_8
+overrides:
+  top_k_context: 8
+index_dir: data/index_eval

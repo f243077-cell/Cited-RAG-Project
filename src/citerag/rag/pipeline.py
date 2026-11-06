@@ -33,7 +33,7 @@ from citerag.prompts import load_prompt
 from citerag.rag.condense import condense, rewrite
 from citerag.rag.context import Chunk, build_context
 from citerag.rag.generate import citation_hint, generate
-from citerag.rag.verify import needs_retry, verify_citations
+from citerag.rag.verify import Passage, needs_retry, verify_citations
 from citerag.schemas import (
     CacheInfo,
     ChatRequest,
@@ -68,6 +68,7 @@ class Deps:
     log: LogStore
     namespace: Callable[[], str]
     index_lock: threading.Lock = field(default_factory=threading.Lock)  # uploads and searches take turns
+    observe: Callable[[list[Passage], list[Chunk]], None] | None = None  # eval: what the generator saw
 
 
 class _Trace:
@@ -224,6 +225,8 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
     passages, warnings = build_context(chunks, d.cfg.context_token_budget)
     if not passages:
         return _refusal(req, t, NOT_FOUND, cache_info)
+    if d.observe is not None:
+        d.observe(passages, chunks)
     by_marker = {p.marker: p for p in passages}
 
     with t.stage("generate"):

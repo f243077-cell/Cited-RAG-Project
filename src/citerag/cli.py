@@ -37,15 +37,25 @@ def ingest(
     path: Annotated[Path, typer.Argument(help="A file or a folder")],
     index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
     via_api: Annotated[bool, typer.Option(help="Send the files to the running backend")] = False,
+    config: Annotated[Path | None, typer.Option(help="Experiment YAML: settings and index folder")] = None,
 ) -> None:
     """Add documents to the index. Stop the API first, or use --via-api: Chroma allows one writer process."""
     if via_api:
         _ingest_via_api(path)
         return
+    from citerag.eval.experiments import apply_overrides, load_experiment
     from citerag.index.store import open_store  # loads the heavy frameworks, so not at import time
     from citerag.ingest.pipeline import Ingestor
 
     settings = get_settings()
+    try:
+        experiment = load_experiment(config) if config else None
+        if experiment is not None:
+            settings = apply_overrides(settings, experiment.overrides)
+            index_dir = index_dir or experiment.index_dir
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
     target = index_dir or settings.index_dir
     store = open_store(settings, target)
     try:
@@ -98,6 +108,8 @@ def _print_report(title: str, report: RetrievalReport) -> None:
     for k in report.ks:
         typer.echo(f"  hit@{k}: {report.hits[k]}/{report.n_scored} ({report.hit_rate[k]:.0%})")
     typer.echo(f"  MRR@{report.mrr_k}: {report.mrr:.3f}")
+    for k, n in report.full_coverage.items():
+        typer.echo(f"  multi_chunk full_coverage@{k}: {n}/{report.n_multi_chunk}")
 
 
 def _check_index(target: Path, settings: Settings) -> None:
@@ -174,6 +186,109 @@ def eval_retrieval(
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     typer.echo(f"Saved {run_dir / 'summary.json'}")
+
+
+@eval_app.command("run")
+def eval_run(
+    golden: Annotated[Path, typer.Option(help="JSONL of golden items")] = Path("eval/golden/golden.jsonl"),
+    config: Annotated[Path | None, typer.Option(help="Experiment YAML in configs/experiments")] = None,
+    index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
+    offline: Annotated[bool, typer.Option(help="Retrieval metrics only: zero LLM requests")] = False,
+    rerank: Annotated[bool, typer.Option(help="Also score the list after the cross-encoder")] = False,
+    limit: Annotated[int | None, typer.Option(help="Only the first N items")] = None,
+    max_requests: Annotated[int | None, typer.Option(help="Pause before this many LLM requests")] = None,
+    resume: Annotated[str | None, typer.Option(help="Continue this run id")] = None,
+    skip_judge: Annotated[bool, typer.Option(help="No verdicts now; --resume adds them later")] = False,
+    skip_type: Annotated[list[str] | None, typer.Option(help="Leave out an item type")] = None,
+    require_verified: Annotated[bool, typer.Option(help="Refuse items no human has verified")] = False,
+) -> None:
+    """Score the system on a golden file. Saves after every item, so a run can resume."""
+    from citerag.eval.execute import execute_run
+    from citerag.eval.experiments import apply_overrides, load_experiment
+    from citerag.eval.golden import load_golden
+
+    try:
+        settings, experiment = get_settings(), None
+        if config is not None:
+            experiment = load_experiment(config)
+            settings = apply_overrides(settings, experiment.overrides)
+            index_dir = index_dir or experiment.index_dir
+        target = index_dir or settings.index_dir
+        items = load_golden(golden, require_verified=require_verified)
+        leave_out = {*(skip_type or []), "image"}  # image items need the M5 flow
+        items = [item for item in items if item.type not in leave_out][:limit]
+        _check_index(target, settings)
+        summary = execute_run(
+            settings, golden, items, target, experiment, offline, rerank, max_requests, resume, skip_judge
+        )
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+
+    if summary.unverified_items:
+        typer.echo(
+            f"UNVERIFIED: {summary.unverified_items} of {summary.n_items} items: provisional numbers only"
+        )
+    typer.echo(f"Run {summary.run_id}: {summary.status}{f' ({summary.reason})' if summary.reason else ''}")
+    typer.echo(f"Items done: {summary.n_done} of {summary.n_items}. LLM requests: {summary.requests_used}")
+    for name, value in summary.headline().items():
+        typer.echo(f"  {name}: {'not measured' if value is None else f'{value:.1%}'}")
+    if summary.answers is not None:
+        a = summary.answers
+        typer.echo(f"  injection leaks: {a.injection_leaks} of {a.injection_items}")
+        typer.echo(f"  waiting for the judge: {a.pending_judge}; errors: {a.errors}")
+    if summary.status in ("paused", "stopped"):
+        typer.echo(f"Continue with --resume {summary.run_id}")
+
+
+@eval_app.command("compare")
+def eval_compare(run_a: str, run_b: str) -> None:
+    """Delta table for two runs. With about 40 items, differences under 3 points are noise."""
+    from citerag.eval.report import NOISE_POINTS, compare_rows, load_summary
+
+    try:
+        a, b = load_summary(run_a), load_summary(run_b)
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+
+    def show(value: float | None) -> str:
+        return "-" if value is None else f"{value:.1%}"
+
+    typer.echo(f"{'metric':<24}{'A':>9}{'B':>9}{'delta':>10}")
+    for name, x, y, delta in compare_rows(a, b):
+        change = "-" if delta is None else f"{delta:+.1f}"
+        note = "" if delta is None or abs(delta) >= NOISE_POINTS else "  (noise)"
+        typer.echo(f"{name:<24}{show(x):>9}{show(y):>9}{change:>10}{note}")
+
+
+@eval_app.command("gate")
+def eval_gate(run_id: str) -> None:
+    """What each MIN_TOP_SIMILARITY would do on a run's cosines. Prints a proposal and changes nothing."""
+    from citerag.eval.report import load_summary
+    from citerag.eval.scoring import gate_sweep, propose_gate
+
+    try:
+        summary = load_summary(run_id)
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+    answerable, unanswerable = summary.answerable_cosines, summary.unanswerable_cosines
+    rows = gate_sweep(answerable, unanswerable)
+    for row in rows:
+        if row.tau * 100 % 5 < 0.01:
+            typer.echo(
+                f"tau {row.tau:.2f}: stops {row.false_refusals} of {len(answerable)} answerable, "
+                f"{row.gate_refusals} of {len(unanswerable)} unanswerable"
+            )
+    best = propose_gate(rows)
+    if best is None:
+        typer.echo("No threshold keeps every answerable item.")
+    else:
+        typer.echo(
+            f"Proposal: {best.tau:.2f}, the highest with no false refusal. It stops "
+            f"{best.gate_refusals} of {len(unanswerable)} unanswerable items. Set MIN_TOP_SIMILARITY yourself."
+        )
 
 
 @eval_app.command("explain")

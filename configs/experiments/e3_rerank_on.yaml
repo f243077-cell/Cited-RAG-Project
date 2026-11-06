@@ -1,0 +1,5 @@
+name: e3_rerank_on
+rerank: true
+overrides:
+  rerank_enabled: true
+index_dir: data/index_eval

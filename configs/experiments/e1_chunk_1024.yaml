@@ -1,0 +1,5 @@
+name: e1_chunk_1024
+overrides:
+  chunk_size: 1024
+  chunk_overlap: 128
+index_dir: data/index_e1_1024

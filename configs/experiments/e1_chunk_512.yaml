@@ -1,0 +1,5 @@
+name: e1_chunk_512
+overrides:
+  chunk_size: 512
+  chunk_overlap: 64
+index_dir: data/index_eval
