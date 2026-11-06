@@ -60,6 +60,6 @@ def health(
         manifest=manifest,
         namespace=current_namespace(settings, manifest) if manifest else None,
         cache=cache.stats(),
-        llm_requests_24h=requests_last_24h(settings.logs_db_path),
+        llm_requests_24h=requests_last_24h(settings.logs_db_path, provider="openrouter"),
         max_requests_per_day=settings.max_requests_per_day,
     )

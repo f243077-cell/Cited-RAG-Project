@@ -101,6 +101,14 @@ class ChatResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class Message(BaseModel):
+    session_id: str
+    ts: float  # Unix seconds
+    role: Literal["user", "assistant"]
+    content: str
+    request_id: str | None = None
+
+
 # ---- 2b. Documents and errors ---------------------------------------------------
 class IngestReport(BaseModel):
     doc_id: str
