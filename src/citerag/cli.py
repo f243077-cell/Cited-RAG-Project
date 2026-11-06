@@ -418,6 +418,82 @@ def eval_bench_cache(
         typer.echo(f"Report: {report}")
 
 
+@eval_app.command("gen-candidates")
+def eval_gen_candidates(
+    n: Annotated[int, typer.Option(help="How many candidates to aim for")] = 60,
+    index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
+    out: Annotated[Path, typer.Option(help="Appended to")] = Path("eval/golden/candidates.jsonl"),
+    seed: Annotated[int, typer.Option(help="Which chunks get sampled")] = 7,
+    max_requests: Annotated[int | None, typer.Option(help="Pause before this many LLM requests")] = None,
+    estimate: Annotated[bool, typer.Option(help="Print the request estimate and stop")] = False,
+) -> None:
+    """Question Writer plus Question Critic. Appends items with verified=false: a human must review them."""
+    from citerag.agents.eval_crews import estimate_candidate_requests
+
+    typer.echo(f"Up to {n} candidates: about {estimate_candidate_requests(n)} LLM requests")
+    if estimate:
+        return
+    import asyncio
+
+    from citerag.agents.eval_crews import generate_candidates
+    from citerag.agents.runtime import CrewRuntime
+    from citerag.analytics.logs import LogStore
+    from citerag.eval.golden import load_golden
+    from citerag.index.retriever import HybridRetriever
+    from citerag.index.store import open_store
+    from citerag.llm.gateway import OpenRouterGateway
+
+    settings = get_settings()
+    target = index_dir or settings.index_dir
+    try:
+        existing = load_golden(out) if out.exists() else []
+        _check_index(target, settings)
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+    store = open_store(settings, target)
+    try:
+        chunks = HybridRetriever(store, settings).all_chunks()
+    finally:
+        store.close()
+    log = LogStore(settings.logs_db_path)
+    runtime = CrewRuntime(settings, OpenRouterGateway(settings, log), log)
+    run = asyncio.run(generate_candidates(runtime, chunks, existing, out, n, max_requests, seed))
+    typer.echo(f"{run.status}{f' ({run.reason})' if run.reason else ''}: {run.written} candidates in {out}")
+    typer.echo(f"LLM requests: {run.requests}. Every item is unverified until a human reviews it.")
+
+
+@eval_app.command("analyze-failures")
+def eval_analyze_failures(
+    run_id: str,
+    out: Annotated[Path, typer.Option(help="The report")] = Path("docs/results/failure_analysis.md"),
+    estimate: Annotated[bool, typer.Option(help="Count failed items and stop")] = False,
+) -> None:
+    """Failure Analyst: group a run's failed items by root cause. One LLM request; none if nothing failed."""
+    import asyncio
+
+    from citerag.agents.eval_crews import analyze_failures, render_failures
+    from citerag.agents.runtime import CrewRuntime
+    from citerag.analytics.logs import LogStore
+    from citerag.eval.report import load_detail
+    from citerag.llm.gateway import OpenRouterGateway
+
+    settings = get_settings()
+    try:
+        records = load_detail(run_id).items
+        failed = render_failures(records)[1]
+        typer.echo(f"{len(failed)} failed items of {len(records)}")
+        if estimate or not failed:
+            return
+        log = LogStore(settings.logs_db_path)
+        runtime = CrewRuntime(settings, OpenRouterGateway(settings, log), log)
+        asyncio.run(analyze_failures(runtime, run_id, records, out))
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"Report: {out}")
+
+
 @eval_app.command("parts")
 def eval_parts(
     golden: Annotated[Path, typer.Option(help="JSONL of golden items")] = Path(

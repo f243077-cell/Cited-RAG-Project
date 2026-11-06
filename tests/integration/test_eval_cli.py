@@ -81,3 +81,13 @@ def test_empty_index_stops_with_a_clear_message(run, settings, monkeypatch, tmp_
     )
     result = run()
     assert result.exit_code == 1 and "ingest documents first" in result.output
+
+
+def test_crew_estimates_spend_nothing(run):
+    result = CliRunner().invoke(cli.app, ["eval", "gen-candidates", "--n", "6", "--estimate"])
+    assert result.exit_code == 0 and "about 4 LLM requests" in result.output
+
+
+def test_analyze_failures_names_an_unknown_run(run):
+    result = CliRunner().invoke(cli.app, ["eval", "analyze-failures", "no-such-run"])
+    assert result.exit_code == 1 and "not_found" in result.output
