@@ -104,6 +104,8 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - Streamlit 1.67: `chat_input(accept_file=True)` returns `None` until submitted, then a `ChatInputValue` with `.text` (str), `.files`
   (list of `UploadedFile`) and `.audio`.
 - First run downloads the embedding model and PyTorch (large). Do it before a demo.
+- langchain-openai turns `max_tokens=` into `max_completion_tokens` in the request body. Seen on the fake server only: check that
+  OpenRouter honours it when the key is added. `response_metadata["model_name"]` holds the model named in the response.
 - **LlamaIndex overwrites `doc_id` in vector-store metadata** with `node.ref_doc_id or "None"`. On a bare `TextNode` a `doc_id` filter
   returns nothing, silently. Set `node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(node_id=doc_id)`.
 - **LlamaIndex embeds node metadata by default.** Set `excluded_embed_metadata_keys` and `excluded_llm_metadata_keys` to all metadata
