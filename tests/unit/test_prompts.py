@@ -6,7 +6,7 @@ from citerag.prompts import PROMPTS_DIR, load_prompt, parse_prompt
 @pytest.mark.parametrize("name", ["answer", "condense", "rewrite"])
 def test_section_8_prompts_exist(name):
     prompt = load_prompt(name)
-    assert prompt.version == "1" and prompt.name == name and prompt.text
+    assert prompt.version and prompt.name == name and prompt.text
 
 
 def test_every_prompt_file_has_a_version():

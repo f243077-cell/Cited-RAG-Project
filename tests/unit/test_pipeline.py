@@ -240,14 +240,10 @@ def test_doc_filter_reaches_the_retriever(world):
     assert retriever.doc_ids == [["doc"]]
 
 
-@pytest.mark.parametrize(
-    "fields",
-    [{"mode": "deep"}, {"image_b64": "aGk=", "image_media_type": "image/png"}],
-)
-def test_features_of_later_milestones_are_rejected_not_ignored(world, fields):
+def test_deep_mode_is_rejected_not_ignored(world):
     llm, make = world
     with pytest.raises(ValidationFailedError):
-        ask(make(), **fields)
+        ask(make(), mode="deep")
     assert llm.calls == []
 
 

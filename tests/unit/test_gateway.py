@@ -291,3 +291,25 @@ def test_an_unclassified_failure_names_the_exception_type_without_its_text(setti
         _call(gateway)
     assert "prompt text" not in caught.value.message
     assert _rows(cfg)[0]["error_kind"] == "unknown:RuntimeError"
+
+
+def test_an_image_block_reaches_the_provider_as_a_data_url(settings):
+    with FakeOpenRouter() as srv:
+        gateway, _, _ = _gateway(settings, srv)
+        srv.queue_text(GOOD)
+        asyncio.run(
+            gateway.structured_call(
+                role="vision",
+                schema=Reply,
+                system="sys",
+                user=[
+                    {"type": "image", "base64": "aGk=", "mime_type": "image/png"},
+                    {"type": "text", "text": "what is this"},
+                ],
+                call_name="vision",
+            )
+        )
+    parts = srv.requests[0]["messages"][-1]["content"]
+    assert parts[0]["type"] == "image_url"
+    assert parts[0]["image_url"]["url"] == "data:image/png;base64,aGk="
+    assert parts[1] == {"type": "text", "text": "what is this"}

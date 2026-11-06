@@ -29,6 +29,7 @@ from citerag.errors import (
     ValidationFailedError,
 )
 from citerag.llm.gateway import LLMGateway, StructuredResult
+from citerag.multimodal.vision import analyze_image, validate_image
 from citerag.prompts import load_prompt
 from citerag.rag.condense import condense, rewrite
 from citerag.rag.context import Chunk, build_context
@@ -118,8 +119,6 @@ async def _indexed(d: Deps, call: Callable[..., R], *args: object) -> R:
 
 
 def _reject_unbuilt(req: ChatRequest) -> None:
-    if req.image_b64 is not None:
-        raise ValidationFailedError("Image questions arrive in milestone M5")
     if req.mode != "standard":
         raise ValidationFailedError("Deep mode arrives in milestone M7")
 
@@ -189,16 +188,24 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
 
     t.standalone = req.message
     history = d.log.last_turns(req.session_id, d.cfg.history_turns)
-    if history:
+    picture = (req.image_b64, req.image_media_type) if req.image_b64 else None
+    analysis = None
+    if picture:
+        with t.stage("condense"):  # LatencyMs has no vision stage; it counts as preparing the question
+            seen = t.add("vision", await analyze_image(d.llm, *picture, t.request_id))
+        analysis = seen.parsed
+    if history or analysis:
         with t.stage("condense"):
-            result = t.add("condense", await condense(d.llm, history, req.message, t.request_id))
+            call = condense(d.llm, history, req.message, t.request_id, analysis)
+            result = t.add("condense", await call)
         t.standalone = result.parsed.query.strip() or req.message
     question = t.standalone
+    search_query = f"{question} {analysis.search_query}" if analysis else question  # F-MM-1
 
     with t.stage("embed"):
-        embedding = await _indexed(d, d.retriever.embed_query, question)
+        embedding = await _indexed(d, d.retriever.embed_query, search_query)
 
-    use_cache = req.use_cache and d.cfg.cache_enabled and d.cache.stats().enabled
+    use_cache = req.use_cache and d.cfg.cache_enabled and d.cache.stats().enabled and not picture  # F-MM-6
     cache_info = CacheInfo(enabled=use_cache)
     if use_cache:
         with t.stage("cache"):
@@ -208,7 +215,6 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
 
     with t.stage("retrieve"):
         t.top_similarity = await _indexed(d, d.retriever.top_cosine, embedding, req.doc_ids)
-    search_query = question
     if t.top_similarity < d.cfg.min_top_similarity:  # corrective step (a), once
         t.retries += 1
         with t.stage("condense"):
@@ -230,7 +236,7 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
     by_marker = {p.marker: p for p in passages}
 
     with t.stage("generate"):
-        first = t.add("generate", await generate(d.llm, passages, question, t.request_id))
+        first = t.add("generate", await generate(d.llm, passages, question, t.request_id, image=picture))
     llm_answer = first.parsed
     with t.stage("verify"):
         citations, citation_warnings = verify_citations(llm_answer.citations, by_marker)
@@ -240,7 +246,8 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
         hint = citation_hint(citations)
         try:
             with t.stage("generate"):
-                second = t.add("generate", await generate(d.llm, passages, question, t.request_id, hint))
+                call = generate(d.llm, passages, question, t.request_id, hint, picture)
+                second = t.add("generate", await call)
         except (BudgetExceededError, LLMUnavailableError, StructuredOutputError) as exc:
             warnings.append(f"The citation retry failed ({exc.code}).")
         else:
@@ -320,6 +327,8 @@ def _request_row(
 
 async def answer_question(req: ChatRequest, d: Deps) -> ChatResponse:
     _reject_unbuilt(req)
+    if req.image_b64 is not None:
+        validate_image(req.image_b64, req.image_media_type)
     t = _Trace()
     try:
         response = await _answer(req, d, t)

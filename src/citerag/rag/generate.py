@@ -5,6 +5,7 @@ from __future__ import annotations
 from xml.sax.saxutils import escape
 
 from citerag.llm.gateway import LLMGateway, StructuredResult
+from citerag.multimodal.vision import image_block
 from citerag.prompts import load_prompt
 from citerag.rag.context import render_passages
 from citerag.rag.verify import Passage
@@ -31,13 +32,21 @@ def citation_hint(citations: list[Citation]) -> str:
 
 
 async def generate(
-    llm: LLMGateway, passages: list[Passage], question: str, request_id: str, hint: str | None = None
+    llm: LLMGateway,
+    passages: list[Passage],
+    question: str,
+    request_id: str,
+    hint: str | None = None,
+    image: tuple[str, str] | None = None,
 ) -> StructuredResult[LLMCitedAnswer]:
+    """The image goes first, as a separate block (section 10), so MODEL_STRONG must accept images."""
+    text = render_answer_input(passages, question, hint)
+    user = [image_block(*image), {"type": "text", "text": text}] if image else text
     return await llm.structured_call(
         role="strong",
         schema=LLMCitedAnswer,
         system=load_prompt("answer").text,
-        user=render_answer_input(passages, question, hint),
+        user=user,
         call_name="generate",
         request_id=request_id,
     )
