@@ -38,7 +38,7 @@ CiteRAG is two Python processes sharing a local data folder: a **FastAPI backend
 
 ## 3. Tech stack and verification status
 
-Versions below are the ones that resolved together and were exercised on **2026-11-06 with Python 3.13**. `requires-python` is `>=3.11`; other Python versions are untested.
+Versions below are the ones that resolved together and were exercised on **2026-11-06 with Python 3.13**. `requires-python` is `>=3.12` (`numpy>=2.5` needs it) and `.python-version` pins 3.13; other Python versions are untested.
 
 | Layer | Package | Tested version |
 |---|---|---|
@@ -46,8 +46,8 @@ Versions below are the ones that resolved together and were exercised on **2026-
 | | `llama-index-readers-file` (DOCX only) | 0.7.0 |
 | | `llama-index-vector-stores-chroma` | 0.6.0 |
 | | `llama-index-retrievers-bm25` | 0.8.0 |
-| | `llama-index-embeddings-huggingface` | 0.8.0 (resolved only) |
-| | `llama-index-postprocessor-sbert-rerank` | 0.6.0 (resolved only) |
+| | `llama-index-embeddings-huggingface` | 0.8.0 |
+| | `llama-index-postprocessor-sbert-rerank` | 0.6.0 |
 | Vector DB | `chromadb` | 1.5.9 |
 | LLM layer | `langchain` / `langchain-core` / `langchain-openai` | 1.4.9 / 1.7.6 / 1.7.4 |
 | | `openai` (SDK; OpenRouter is OpenAI-compatible) | 2.54.0 |
@@ -63,9 +63,11 @@ No `anthropic` or `litellm` package is installed. The full dependency set was re
 
 **Verified by running** (against a fake OpenAI-compatible server standing in for OpenRouter, no real API calls): `ChatOpenAI` with a custom `base_url`: json_schema and tool-calling structured output, an image block converted to a `data:` URL, `usage_metadata`, `extra_body` provider preferences and custom headers reaching the request, SDK retry on 429 with `Retry-After`, 429 raising `openai.RateLimitError` when `max_retries=0`; CrewAI's built-in `openrouter/<model>` provider with `output_pydantic`, three chained tasks with `context=[...]` and `inputs` containing braces, `max_iter`, `max_execution_time`, and `CrewOutput.token_usage`; LlamaIndex chunking, Chroma with a persisted docstore, reload, hybrid fusion (vector plus BM25), metadata filter, similarity cut-off, `ImageNode`, BM25 persist API; Chroma cosine configuration; `pypdf` text and image extraction; Streamlit `chat_input(accept_file=True)`, `write_stream`, `audio_input`, `pyplot`; the 36 reference tests in the appendices (`ruff check` and `ruff format --check` clean).
 
-**Resolved and installed, but not exercised:** HuggingFace embeddings and the cross-encoder reranker (they need PyTorch and model downloads), Ragas, faster-whisper.
+**Verified by running on 2026-11-06, Windows 10, Python 3.13.13** (preflight, see `docs/PREFLIGHT_REPORT.md`): `uv sync` of the full set; the free-tier limits on the live page; the public model list and its field names; HuggingFace embeddings (384 dimensions, unit norm); Chroma cosine collection, persisted docstore, reload, BM25 after reload, hybrid fusion, `FilterOperator.IN` and the OR fallback (with the fixes in section 6), true cosine gate against `score = exp(-distance)`; the cross-encoder reranker; Streamlit `chat_input` return shape and `st.pyplot` through `streamlit.testing`.
 
-**Not verified:** real OpenRouter calls (which free models currently support image input, structured output and tools; real rate-limit headers and behaviour; real token counts; whether `require_parameters` leaves any free endpoint for a given model), Docker build, Streamlit page rendering, Windows. The free-tier limits were read from OpenRouter's documentation on 2026-11-06 and the free-model list through a summarising fetch tool, so confirm both against the live pages in M0. Treat the first real run of each as part of its milestone, and record surprises in `CLAUDE.md` section "Gotchas".
+**Resolved and installed, but not exercised:** Ragas, faster-whisper.
+
+**Not verified:** real OpenRouter calls (no API key at preflight; the list says which free models claim image input, structured output and tools, but none has been called; real rate-limit headers and behaviour; real token counts; whether `require_parameters` leaves any free endpoint for a given model), Docker build (the daemon was not running), Streamlit page rendering in a browser. Treat the first real run of each as part of its milestone, and record surprises in `CLAUDE.md` section "Gotchas".
 
 ## 4. System overview
 
@@ -165,6 +167,8 @@ citerag/
 
 **Stable IDs.** Set `node.id_ = f"{doc_id}-{chunk_index:04d}"` (images: `f"{doc_id}-img-{sha256[:8]}"`) so re-ingestion is idempotent and logs and eval files stay comparable.
 
+**Node setup (verified; both fail silently if skipped).** Set `node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(node_id=doc_id)`: LlamaIndex writes `doc_id = node.ref_doc_id or "None"` into the vector-store metadata over your own value, so without it every `doc_id` filter returns nothing. Set `excluded_embed_metadata_keys` and `excluded_llm_metadata_keys` to all metadata keys: otherwise metadata is embedded with the text and an indexed sentence queried with itself scores 0.87 instead of 1.0.
+
 **Manifest** (`manifest.json`): `schema_version`, `embedding_model`, `embedding_dim`, `chunk_size`, `chunk_overlap`, `caption_model`, `created_at`, and `docs: {doc_id: {name, sha256, pages, chunks, images, size_bytes, ingested_at}}`. At start-up compare settings with the manifest and raise `index_mismatch` on a difference (F-ING-4).
 
 **Versions.** `corpus_version = corpus_version(doc_ids, index_settings)` and `namespace = cache_namespace(corpus_version, answer_model, answer_prompt_version, retrieval_settings)` (both in Appendix A). Recompute after every ingest or delete and call `cache.invalidate_except(namespace)`.
@@ -210,7 +214,7 @@ flowchart TD
 2. **Load.** PDF: `pypdf`, one LlamaIndex `Document` per page with metadata `page` (1-based), `doc_id`, `doc_name`, `kind="text"` (verified text extraction). Markdown / TXT: read as text, one Document, `page=None`. DOCX [SHOULD]: LlamaIndex `DocxReader`. Standalone PNG / JPEG: no text chunks; the file itself goes through the image path in step 4 (`page=None`). Empty pages are skipped.
 3. **Chunk.** `SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)`; copy page metadata to each node; set stable IDs.
 4. **Images (F-MM-3).** `page.images` from `pypdf` gives `.data` and `.name` (verified). Skip below `MIN_IMAGE_PX` or `MIN_IMAGE_BYTES`; dedupe by SHA-256; keep at most `MAX_IMAGES_PER_DOC` (largest first). Look up `data/captions/<sha256>.json`; otherwise caption (section 10) and save. Build one `TextNode` per image: text = caption + visible text + key facts; metadata `kind="image"`, `page`, `image_path`. Each caption is one LLM request, so a PDF with many figures can use most of a free-tier day: `MAX_IMAGES_PER_DOC` defaults to 10, `IngestReport` shows the requests used, and the request guard applies to ingestion too.
-5. **Embed and write.** `HuggingFaceEmbedding("BAAI/bge-small-en-v1.5")`, batch size 32. bge v1.5 models do not need a query-instruction prefix, so the same plain embedding serves retrieval and the cache (confirm on the model card). Write to Chroma and the docstore, update the manifest, recompute `namespace`, invalidate the cache.
+5. **Embed and write.** `HuggingFaceEmbedding("BAAI/bge-small-en-v1.5", query_instruction=" ", text_instruction=" ")`, batch size 32. LlamaIndex adds a bge query prefix by default (query and text embeddings of one sentence: cosine 0.951) and `""` does not turn it off, because its code uses `or`. One space does (cosine 1.0, verified), so the same plain embedding serves retrieval and the cache. Write to Chroma and the docstore, update the manifest, recompute `namespace`, invalidate the cache.
 6. **Report** an `IngestReport`. Wrap steps 2 to 5 so a failure leaves the index unchanged (write new nodes only after everything succeeded; delete old chunks last).
 
 LlamaIndex rules that bite: `Settings.llm = None` at start-up (verified: LlamaIndex then logs "LLM is explicitly disabled. Using MockLLM" and never tries OpenAI); install no llama-index LLM package (`llama-index-llms-*`); the gateway is the only LLM path.
@@ -289,10 +293,10 @@ async def answer_question(req: ChatRequest, d: Deps) -> ChatResponse:
 **Retrieval details** (`index/retriever.py`; all verified except where noted):
 
 1. Embed the standalone question once with the local model; reuse it for the cache and the gate.
-2. Vector retriever: `index.as_retriever(similarity_top_k=TOP_K_RETRIEVE, filters=...)`. For `doc_ids` use `MetadataFilter(key="doc_id", ...)`; a single equality filter is verified, so test `FilterOperator.IN` against Chroma and fall back to several equality filters combined with `FilterCondition.OR`.
+2. Vector retriever: `index.as_retriever(similarity_top_k=TOP_K_RETRIEVE, filters=...)`. For `doc_ids` use `MetadataFilter(key="doc_id", value=[...], operator=FilterOperator.IN)` (verified against Chroma, needs the SOURCE relationship from section 6; several equality filters with `FilterCondition.OR` also work).
 3. BM25: `BM25Retriever.from_defaults(docstore=..., similarity_top_k=TOP_K_RETRIEVE)`, rebuilt at start-up and after each ingest. It has no metadata filter, so post-filter its results by `doc_id` and fetch `2 x TOP_K_RETRIEVE` when a filter is active.
 4. Fusion: `QueryFusionRetriever([vector, bm25], similarity_top_k=TOP_K_RETRIEVE, num_queries=1, mode="reciprocal_rerank", use_async=False)`. `num_queries` above 1 makes LlamaIndex call an LLM to write extra queries, so keep it at 1.
-5. Optional rerank [SHOULD]: `SentenceTransformerRerank(model=RERANK_MODEL, top_n=TOP_K_CONTEXT)` (resolved, not run). Without rerank, cut the fused list to `TOP_K_CONTEXT`. On any rerank exception, log and continue without it.
+5. Optional rerank [SHOULD]: `SentenceTransformerRerank(model=RERANK_MODEL, top_n=TOP_K_CONTEXT)` (verified: 35 to 54 ms for 5 passages on CPU). Without rerank, cut the fused list to `TOP_K_CONTEXT`. On any rerank exception, log and continue without it.
 6. **Relevance gate uses true cosine, not the LlamaIndex score.** LlamaIndex's Chroma store reports `score = exp(-distance)`, not cosine similarity (verified: cosine 0.2857 came back as 0.4895). RRF scores are rank-based and not comparable to anything. So compute the gate value with a direct Chroma query, `1 - distance` of the top vector hit, using the query embedding from step 1. Add a unit test: an indexed sentence queried with itself gives about 1.0. (If you prefer to avoid the extra query: `cosine = 1 + ln(score)` for LlamaIndex vector hits, but guard it with that same test.)
 7. Convert every `NodeWithScore` to a `Chunk` (`rag/context.py`) right here, and return only `Chunk` objects.
 
@@ -401,16 +405,16 @@ Reference code: `cache/semantic_cache.py` and `cache/namespace.py` (Appendix A).
 
 **Provider.** OpenRouter exposes an OpenAI-compatible API at `https://openrouter.ai/api/v1`. LangChain uses `langchain-openai`'s `ChatOpenAI(model=..., base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)`; CrewAI uses its built-in `openrouter/<model-id>` provider, which reads `OPENROUTER_API_KEY`. Both paths were verified against a fake server (section 3), not against the real service.
 
-**Free-tier limits** (OpenRouter documentation, read 2026-11-06; confirm at https://openrouter.ai/docs/api-reference/limits in M0):
+**Free-tier limits** (https://openrouter.ai/docs/api-reference/limits, confirmed on the live page 2026-11-06):
 
 | Account | Requests per minute | Requests per day |
 |---|---|---|
 | Free models (`:free` IDs), fewer than 10 credits ever purchased | 20 | 50 |
 | Free models, at least 10 credits ever purchased | 20 | 1,000 |
 
-The unit is the HTTP request, so condense, rewrite, regeneration, each retry, each image caption, each judge call and each CrewAI agent step all count. A negative credit balance can break even free models. Relevant errors: 429 rate limited; 402 insufficient credits (without `Retry-After` it means add credits, not wait); 503 no provider matches your routing needs; 502 model down; and an error can arrive **inside an HTTP 200 body**. Section 13 turns this into a request budget.
+The docs grant the higher ceiling from one credit below the threshold (9 today) to absorb fees. `GET /api/v1/key` returns `is_free_tier` and `free_model_daily_requests` (`used`, `limit`, `remaining`); the per-minute limit is not reported there. The unit is the HTTP request, so condense, rewrite, regeneration, each retry, each image caption, each judge call and each CrewAI agent step all count. A negative credit balance can break even free models. Relevant errors: 429 rate limited; 402 insufficient credits (without `Retry-After` it means add credits, not wait); 503 no provider matches your routing needs; 502 model down; and an error can arrive **inside an HTTP 200 body**. Section 13 turns this into a request budget.
 
-**Model roles.** All IDs below are placeholders from OpenRouter's model list read on 2026-11-06 (not run). The free list changes often and models disappear, so IDs live only in `.env`, and M0 runs `scripts/pick_free_models.py`.
+**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06 (from the list; none called yet): `nvidia/nemotron-3.5-super-vl:free` for fast, strong and vision, `xingchen-agi/xing4.0-29b-a4b:free` for judge.
 
 | Role | Env var | Used for | Must support |
 |---|---|---|---|
@@ -421,7 +425,7 @@ The unit is the HTTP request, so condense, rewrite, regeneration, each retry, ea
 
 All four may be the same model; the quota is per account, not per model. **Pin one model per role for the whole of an experiment**, and never use the random `openrouter/free` router for experiments: it picks a different model per request and destroys comparability. Record in every `llm_calls` row the model that actually answered (the response carries it; the `ChatOpenAI` metadata key was not checked, so confirm it).
 
-`scripts/pick_free_models.py` (F-OPS-7): fetch the public list `GET https://openrouter.ai/api/v1/models`, keep entries whose prompt and completion prices are both 0, read `architecture.input_modalities` and `supported_parameters` (look for `structured_outputs` or `response_format`, `tools`, `temperature`), print a table sorted by capability, and print suggested `.env` lines. Never write `.env` automatically. The field names come from OpenRouter's documentation and a summarised fetch, so check them against one live response first.
+`scripts/pick_free_models.py` (F-OPS-7): fetch the public list `GET https://openrouter.ai/api/v1/models`, keep entries whose `pricing.prompt` and `pricing.completion` are both 0 and whose `architecture.output_modalities` is text only, drop `openrouter/*` routers, read `architecture.input_modalities`, `supported_parameters` (`structured_outputs`, `response_format`, `tools`, `temperature`), `reasoning.mandatory` and `expiration_date` (field names checked against a live response on 2026-11-06), print a table sorted by capability, and print suggested `.env` lines. Picks need a `:free` id and no expiration date. Never write `.env` automatically.
 
 **Sampling.** The gateway sends no `temperature`, `top_p` or `top_k` unless configured (verified: `ChatOpenAI` sends none by default). `JUDGE_TEMPERATURE` defaults to 0; `LLM_TEMPERATURE` defaults to unset. Providers may ignore these or reject them: on an HTTP 400 that names a parameter, retry once without the optional parameters and log a warning. **Reasoning models can spend the whole `max_tokens` budget on hidden reasoning and return empty text**: keep `LLM_MAX_TOKENS` generous (2000) and treat empty content or `finish_reason == "length"` as retryable once with a doubled limit. Because outputs vary run to run, the eval harness supports repeated runs (F-EVA-8).
 
@@ -453,7 +457,7 @@ class LLMGateway(Protocol):
 5. **Errors inside HTTP 200:** langchain-openai raises `ValueError(<error dict>)` on a plain call and `TypeError` on the structured path; both classify as `provider_body` and are retried.
 6. **Daily guard (`llm/budget.py`):** count `llm_calls` rows in a rolling 24 hours (the reset time is not stated in the documentation read) and raise `budget_exceeded` once `MAX_REQUESTS_PER_DAY` is reached. Cache hits never call it. For CrewAI runs call `limiter.try_acquire(n)` to reserve `n` slots first, then log the real requests afterwards.
 7. **Eval disk cache (optional, eval only):** a directory keyed by `sha256(model, messages, schema name, sampling)` that returns a stored response instead of calling the API, so a repeated eval run costs no requests. Switched on only by `citerag eval run --llm-disk-cache`; never in the live app, never in `bench-cache`, never in repeated variance runs (F-EVA-8).
-8. **Cost fields:** `shadow_usd = estimate_cost_usd(model, in, out, pricing)` (Appendix A). Free models cost 0 for real; the shadow value uses the paid reference model in `configs/pricing.yaml` so savings stay comparable.
+8. **Cost fields:** `shadow_usd = estimate_cost_usd(model, in, out, pricing)` (Appendix A). The project uses free models only (owner decision, 2026-11-06), so the reference in `configs/pricing.yaml` is a free model at 0 and shadow dollars read 0; compare runs by requests and tokens.
 9. **`FakeGateway`** (`llm/fake.py`): returns queued Pydantic objects keyed by `call_name`, records every call, can raise on demand. Pipeline unit tests use only this. Gateway tests use `FakeOpenRouter` (`tests/fake_openai_server.py`, Appendix A), a real HTTP server on localhost, so the retry, parsing and counting code is exercised end to end.
 
 ## 12. Agents (CrewAI)
@@ -611,7 +615,7 @@ curl -s localhost:8000/v1/chat -H 'content-type: application/json' \
 Structure: `ui/app.py` (entry and sidebar), `ui/pages/1_Chat.py`, `2_Library.py`, `3_Dashboard.py`, `4_Evaluation.py`, `ui/api_client.py` (httpx wrapper that returns Pydantic models). The UI imports only `schemas` and `analytics.plots`; never backend internals (F-UI-6).
 
 - **State:** `st.session_state` holds `session_id` (uuid), the message list, and the toggles. History is also stored server-side; the UI only displays it.
-- **Chat input:** `st.chat_input(..., accept_file=True, file_type=["png", "jpg", "jpeg", "webp"])` (existence of `accept_file` verified; confirm the return shape in the installed version). Show progress with `st.status` driven by SSE, or a spinner in v1.
+- **Chat input:** `st.chat_input(..., accept_file=True, file_type=["png", "jpg", "jpeg", "webp"])` returns `None` until submitted, then a `ChatInputValue` with `.text` (str), `.files` (list of `UploadedFile`) and `.audio` (verified on 1.67). Show progress with `st.status` driven by SSE, or a spinner in v1.
 - **Rendering:** `st.markdown` without `unsafe_allow_html`. One `st.expander` per citation with a verified or warning icon, page, quote, and `st.image` for image chunks. Show a "cached" badge with similarity, and a usage line.
 - **Data loading:** `@st.cache_data(ttl=30)` around log fetches, so reruns stay cheap.
 - **Charts:** every chart is a pure function in `analytics/plots.py` taking a DataFrame (or the sweep DataFrame) and returning a Matplotlib `Figure` (use the `Agg` backend in tests); the page calls `st.pyplot(fig)` and `plt.close(fig)`. Each function has a smoke test with a synthetic DataFrame.
@@ -635,7 +639,7 @@ For chart 5 and 6 the request log must record the best cache similarity even on 
 
 One `Settings(BaseSettings)` class in `config.py` (`env_file=".env"`), validated at start-up. Experiments override fields through a YAML file passed to the eval CLI; the resolved settings are saved in the run folder. Required: `OPENROUTER_API_KEY`. See Appendix D for every key and its default. Prompts are files with a `version:` header loaded by `load_prompt(name)`; the version string goes into `requests.prompt_version` and `config.json`.
 
-`configs/pricing.yaml` holds **shadow pricing** only (free models cost 0): the date, the source URL, one paid reference model and its input and output price per million tokens, copied from OpenRouter's official model page in M0, never from memory. The loader exposes the reference entry as `pricing["_reference"]`, which `estimate_cost_usd` uses for every model that is not listed. See the file in the starter kit.
+`configs/pricing.yaml` holds **shadow pricing** only: the date, the source URL, one reference model and its input and output price per million tokens. Free models only (owner decision, 2026-11-06), so the reference is a free model at 0. `llm/pricing.py` exposes the reference entry as `pricing["_reference"]`, which `estimate_cost_usd` uses for every model that is not listed.
 
 ## 17. Testing
 
@@ -705,7 +709,12 @@ Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.1
 10. **`QueryFusionRetriever(num_queries=1, use_async=False)`.** More queries trigger hidden LLM calls. Set `Settings.llm = None` at start-up so LlamaIndex never reaches for OpenAI, and install no llama-index LLM package.
 11. **Chroma:** cosine space at creation only; collection names need 3 or more characters; one writer process.
 12. **First run downloads the embedding model** and PyTorch is large; do it before a demo.
-13. **Streamlit `chat_input(accept_file=True)`** exists in 1.67; confirm the return type before relying on attribute names.
+13. **Streamlit `chat_input(accept_file=True)`** returns `None`, then a `ChatInputValue` with `.text`, `.files`, `.audio` (1.67).
+14. **LlamaIndex overwrites metadata `doc_id`** with `ref_doc_id or "None"`, so filters silently return nothing without a SOURCE relationship (section 6).
+15. **LlamaIndex embeds node metadata by default**, which lowers cosine scores (0.87 instead of 1.0) and skews the relevance gate. Exclude all metadata keys (section 6).
+16. **`HuggingFaceEmbedding` adds a bge query prefix by default**, and `query_instruction=""` does not stop it. Pass `" "` (section 7).
+17. **The embedding model is cached by llama_index**, under `platformdirs.user_cache_dir("llama_index")`, not `~/.cache/huggingface`.
+18. **Price 0 does not mean usable chat model.** The list also has `openrouter/free`, `google/lyria-*` (audio output) and `stealth/*` without a `:free` suffix.
 
 ## Appendix A. Reference code (tested; copy as-is)
 
@@ -2232,7 +2241,7 @@ def test_error_body_inside_http_200_is_classified():
 name = "citerag"
 version = "0.1.0"
 description = "Cited RAG chatbot with semantic caching, multimodal input and an evaluation harness"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   # RAG engine (retrieval only: no llama-index LLM packages)
   "llama-index-core>=0.14,<0.15",
@@ -2308,7 +2317,7 @@ OPENROUTER_TITLE=CiteRAG                         # optional app-attribution head
 OPENROUTER_REQUIRE_PARAMETERS=true               # route only to endpoints that support response_format / tools
 OPENROUTER_DATA_COLLECTION=allow                 # "deny" avoids providers that store or train on prompts; may leave no free endpoint (503)
 
-# --- Models (PLACEHOLDERS taken from OpenRouter's model list read on 2026-11-06, not run) ---
+# --- Models (all exist with the needed capabilities in OpenRouter's list on 2026-11-06; none called yet) ---
 # The free list changes often. In M0 run `uv run python scripts/pick_free_models.py` and paste its picks here.
 # Needs: vision = image input; fast/strong/judge = structured outputs (response_format) or tool calling.
 MODEL_FAST=nvidia/nemotron-3.5-super-vl:free

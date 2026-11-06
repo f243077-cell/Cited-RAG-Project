@@ -51,10 +51,10 @@ LlamaIndex 0.14 (retrieval) · Chroma 1.5 (embedded) · LangChain 1.4 + langchai
 NumPy / Pandas / Matplotlib · rapidfuzz · pypdf · local embeddings `BAAI/bge-small-en-v1.5`.
 No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM requests.
 
-## Free-tier rules (OpenRouter docs read 2026-11-06; confirm in M0)
+## Free-tier rules (OpenRouter docs confirmed on the live page, 2026-11-06)
 
-- Limits: 20 requests per minute; 50 per day (1,000 per day after the account has bought at least 10 credits). Every HTTP attempt
-  counts: condense, rewrite, retries, captions, judge calls, each CrewAI agent step.
+- Limits: 20 requests per minute; 50 per day (1,000 per day after the account has bought at least 10 credits; the docs grant it from
+  9). `GET /api/v1/key` reports `free_model_daily_requests` (`used`, `limit`, `remaining`). Every HTTP attempt counts: condense, rewrite, retries, captions, judge calls, each CrewAI agent step.
 - The gateway runs the SDK with `max_retries=0` and does its own retries, rate limiting (`LLM_MAX_RPM`) and daily guard
   (`MAX_REQUESTS_PER_DAY`), logging one `llm_calls` row per attempt. Never add SDK-level retries.
 - Never loop on a failure. Quota, credit or auth errors raise a typed error with a clear message.
@@ -81,7 +81,7 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 7. **Only the backend opens Chroma.** The UI imports `schemas` and `analytics.plots` only and talks to the API over HTTP.
 8. **Prompts live in `src/citerag/prompts/*.md`** with a `version:` header; the version is logged per request.
 9. **Config via `config.py` (pydantic-settings)**; no `os.environ` reads elsewhere. `configs/pricing.yaml` holds only *shadow*
-   prices of one paid reference model (fill from OpenRouter's official model page and record the date; never from memory).
+   prices. Free models only (owner decision, 2026-11-06): no paid reference model, so shadow dollars read 0.
 10. Cache stores only answerable, fully verified, standard-mode, no-image answers, and is scoped by `namespace`.
 
 ## Gotchas (verified while preparing the design; add new ones here as you find them)
@@ -101,14 +101,24 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - BM25 needs the docstore: `VectorStoreIndex(nodes, storage_context=sc, store_nodes_override=True)` and persist `sc`.
 - Chroma: cosine space is set at collection creation only; collection names need 3+ characters; one writer process.
 - CrewAI: model string `openrouter/<model-id>`; set `CREWAI_DISABLE_TELEMETRY=true` and `OTEL_SDK_DISABLED=true` before import.
-- Streamlit: `chat_input(accept_file=True)` exists in 1.67; check the return shape in the installed version.
+- Streamlit 1.67: `chat_input(accept_file=True)` returns `None` until submitted, then a `ChatInputValue` with `.text` (str), `.files`
+  (list of `UploadedFile`) and `.audio`.
 - First run downloads the embedding model and PyTorch (large). Do it before a demo.
-- Not yet verified against real OpenRouter: which free models support images, structured output and tools today; real rate-limit
-  headers; real token counts; the metadata key for the serving model. Verify in M0 and M3.
+- **LlamaIndex overwrites `doc_id` in vector-store metadata** with `node.ref_doc_id or "None"`. On a bare `TextNode` a `doc_id` filter
+  returns nothing, silently. Set `node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(node_id=doc_id)`.
+- **LlamaIndex embeds node metadata by default.** Set `excluded_embed_metadata_keys` and `excluded_llm_metadata_keys` to all metadata
+  keys, or an indexed sentence queried with itself scores 0.87 instead of 1.0, which skews `MIN_TOP_SIMILARITY`.
+- **`HuggingFaceEmbedding` adds a bge query prefix on its own** (query and text embeddings of one sentence: cosine 0.951).
+  `query_instruction=""` does not stop it because the code uses `or`; pass `query_instruction=" ", text_instruction=" "`.
+- The embedding model lands in llama_index's cache (`platformdirs.user_cache_dir("llama_index")`), not `~/.cache/huggingface`.
+- OpenRouter's free list has more than chat models: `openrouter/free` (router), `google/lyria-*` (audio output) and `stealth/*` (no
+  `:free` suffix) all show price 0. `scripts/pick_free_models.py` filters them.
+- Not yet verified against real OpenRouter (no key at preflight; run `scripts/preflight/s*.py`): structured output, tools, images,
+  `require_parameters`, real rate-limit headers, real token counts, the metadata key for the serving model.
 
 ## Conventions
 
-- Python 3.11+, type hints on all public functions, `ruff` clean (line length 110), small modules, no wildcard imports.
+- Python 3.12+ (numpy 2.5 needs it; `.python-version` pins 3.13), type hints on all public functions, `ruff` clean (line length 110), small modules, no wildcard imports.
 - Use `logging`, not `print`. Never log API keys, image bytes or full documents.
 - Raise typed errors from `errors.py` that map to `ErrorCode`; the API always returns `ErrorResponse`.
 - Tests: `tests/unit` (pure logic, no network), `tests/integration` (TestClient + `FakeGateway` + `HashEmbedding`),

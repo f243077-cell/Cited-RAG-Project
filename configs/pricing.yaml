@@ -1,9 +1,9 @@
-# SHADOW pricing. Free (:free) models cost 0 dollars; these prices only turn tokens into "what this would cost on a paid
-# model" so cache savings and experiment costs stay comparable. Fill during M0 from OpenRouter's official model page for
-# ONE paid reference model (never from memory) and record the date. 0.0 means "not filled in yet".
-retrieved_on: ""            # YYYY-MM-DD
-source_url: ""              # the reference model's page on openrouter.ai
-reference_model: ""         # a paid model id, e.g. the one you would use if you left the free tier
+# SHADOW pricing. The owner decided on 2026-11-06 to use free models only, with no paid reference model, so every price
+# here is 0 and shadow dollars read 0. LLM requests and tokens are the cost numbers that matter. To get a dollar figure
+# later, replace the reference with a model from OpenRouter's official model page (never from memory) and record the date.
+retrieved_on: "2026-11-06"
+source_url: "https://openrouter.ai/nvidia/nemotron-3.5-super-vl:free"
+reference_model: "nvidia/nemotron-3.5-super-vl:free"
 models:
-  # "<reference model id>": {input_per_mtok: 0.0, output_per_mtok: 0.0}   # US dollars per million tokens
+  "nvidia/nemotron-3.5-super-vl:free": {input_per_mtok: 0.0, output_per_mtok: 0.0} # US dollars per million tokens
   # The loader exposes the reference entry as pricing["_reference"], used for every model not listed here.
