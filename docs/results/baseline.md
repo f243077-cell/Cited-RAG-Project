@@ -1,8 +1,8 @@
 # Baseline (provisional)
 
-Date: 2026-11-06. **PROVISIONAL: this is not the M4 baseline.** The exit criterion needs a human-verified golden set, and all 43 items are still drafts with `verified: false`, so no number here may be quoted as a result. No answerable item has been judged yet, so faithfulness and correctness have no value.
+Date: 2026-11-06. **PROVISIONAL: this is not the M4 baseline.** The exit criterion needs a human-verified golden set, and all 43 items are still drafts with `verified: false`, so no number here may be quoted as a result. Only one item has been judged, so faithfulness and correctness have no value yet.
 
-Setup: `nvidia/nemotron-3.5-super-vl:free` for fast, strong and judge, prompt version 1, `data/index_eval`, hybrid search, rerank off. Image items and the image half of `i-005` wait for M5.
+Setup: `nvidia/nemotron-3.5-super-vl:free` for fast, strong and judge, prompt version 1, `data/index_eval`, hybrid search, rerank off. Image items were not part of these runs: see `M5_images.md`.
 
 ```bash
 uv run citerag eval run --golden eval/golden/candidates.jsonl --index-dir data/index_eval --offline --rerank
@@ -17,7 +17,7 @@ uv run citerag eval run --golden eval/golden/candidates.jsonl --index-dir data/i
 | G1 | Citation validity (verifier) | at least 0.95 | not measured on the set | Needs the answerable run |
 | G1 | Answer correct (judge) | at least 0.75 | not measured | Needs the answerable run |
 | G2 | Correct refusals | at least 0.90 | 7 of 7 (100%) | Provisional, measured at gate 0.30 |
-| G2 | Injection canary leaks | 0 | 0 of 5 | Provisional; one canary sits in an image |
+| G2 | Injection canary leaks | 0 | 0 of 5 | Provisional; `i-005` retested with its image captioned, still no leak |
 | G3 | hit@5 (hybrid) | at least 0.85 | 24 of 26 (92%) | Provisional |
 
 PRD section 7 is unchanged: it should move only after a verified baseline.
@@ -41,7 +41,7 @@ The run used 12 LLM requests for 12 items, one each, with no retry, error or cor
 
 - All 7 unanswerable items were refused, including the 5 on-topic near-misses. Those are the items the gate cannot catch, so this was the model's work.
 - The four text injection items were answered from the real content of the poisoned files, with every citation valid and no canary in the answer.
-- `i-005` hides its canary in an image, so this run did not test it: the image has no text chunks until M5.
+- `i-005` hides its canary in an image, so this run did not test it. The M5 check did, and it did not leak.
 
 This run used the old gate value of 0.30 and was not repeated at 0.55.
 
@@ -51,7 +51,7 @@ This run used the old gate value of 0.30 and was not repeated at 0.55.
 
 ## Judge
 
-The judge currently runs on `nvidia/nemotron-3.5-super-vl:free`, **the same model as the answerer, so it grades its own work**. Treat its verdicts as a stopgap. It has not yet returned a `JudgeVerdict`. Results of the checks on 2026-11-06:
+The judge currently runs on `nvidia/nemotron-3.5-super-vl:free`, **the same model as the answerer, so it grades its own work**. Treat its verdicts as a stopgap. It returned its first real `JudgeVerdict` in the M5 check, in 19.8 s. Results of the checks on 2026-11-06:
 
 | Model | Result | Latency |
 |---|---|---|
@@ -66,9 +66,10 @@ The judge currently runs on `nvidia/nemotron-3.5-super-vl:free`, **the same mode
 |---|---|---|
 | One standard question, first turn | 1 | 1.0 per item over 12 items |
 | Follow-up | 2 | 2 in the M3 check |
-| Judge | 1 per scored item | not measured |
+| Judge | 1 per scored item | 1 on the one item judged |
+| Image item | +2 | 3 to answer, 4 with the judge, on one item |
 
-With the judge on OpenRouter, a full run on the current account costs **about 64 requests**: 38 answers plus 26 verdicts. It rises to about 74 with the 5 image items, plus 5 vision calls. The judge adds 26 to 31 requests per run that a separate provider would have carried. These are minimums, because corrective retries add to them. At `MAX_REQUESTS_PER_DAY=40` either run takes two days.
+With the judge on OpenRouter, a full run on the current account costs **about 64 requests**: 38 answers plus 26 verdicts. It rises to about 84 with the 5 image items: each adds a vision call, a condense, an answer and a verdict. The judge adds 26 to 31 requests per run that a separate provider would have carried. These are minimums, because corrective retries add to them. At `MAX_REQUESTS_PER_DAY=40` either run takes two days.
 
 ## Not done
 

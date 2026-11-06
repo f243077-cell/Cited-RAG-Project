@@ -37,6 +37,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run uvicorn citerag.api.main:app --reload --port 8000
 uv run streamlit run src/citerag/ui/app.py
 uv run citerag ingest data/sample         # stop the API first (single-writer Chroma) or add --via-api
+uv run citerag ingest data/sample --captions   # one LLM request per new image; also fills in missing captions
 uv run citerag eval retrieval --rerank --skip-type image --index-dir data/index_eval   # hit@k, MRR, zero LLM requests
 uv run citerag eval explain a-017 --index-dir data/index_eval   # one item: ranks per retriever, gold page text
 uv run python scripts/audit_gold_pages.py --index-dir data/index_eval   # pages with the answer's terms that are not gold
@@ -146,16 +147,24 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   `unknown:<ExceptionType>`, so read that on the next failure before adding a retry.
 - `eval/results` also holds older `*-retrieval` folders with another shape; `list_runs` leaves them out.
 - Not yet verified against real OpenRouter: real rate-limit headers, `data_collection` on the real service.
-- **`gemini-3.8-flash` generated nothing in the spike (2026-11-06), so vision and judge do not work yet.** Through the OpenAI
-  endpoint, three generation requests all hit the client timeout with no HTTP status: structured output at 60 s and 180 s, plain
-  text at 90 s. The hang is not `response_format`. `GET /models` (61 models, 1.6 s) and a POST naming an unknown model (404 in 0.5 s)
+- **`gemini-3.8-flash` generated nothing in the spike (2026-11-06), so vision does not work yet.** Through the OpenAI endpoint, four
+  generation requests all hit the client timeout with no HTTP status: structured output at 60 s and 180 s, plain text and an image
+  at 90 s. The hang is not `response_format`. `GET /models` (61 models, 1.6 s) and a POST naming an unknown model (404 in 0.5 s)
   both work, so network, key and URL are fine. Structured output, images, tool calling and `temperature` are all still unverified.
-  Requests used: 4 of 5. The native `generateContent` path was not tried.
+  All 5 spike requests are used. The native `generateContent` path was not tried.
+- **While vision is on Gemini, an API upload of a PDF with figures stalls for about 3 minutes** on its first caption, then skips the
+  rest and keeps the text, and the index lock blocks chat meanwhile. Test vision with `PROVIDER_VISION=openrouter
+  MODEL_VISION=nvidia/nemotron-3.5-super-vl:free` in the process environment, which overrides `.env`.
+- `MODEL_STRONG` must accept images: `generate` sends the attached image to the strong role, not the vision role.
+- **A caption copies an injection into the index by design.** `whiteboard_note.png` put `CANARY-9034` into `visible_text` and `key_facts`,
+  so only the untrusted-data rule in the answer prompt keeps it out of the answer. Keep `i-005` in every run.
+- Indexes built before M5 hold no image chunks. `citerag ingest PATH --captions` adds them without re-ingesting the text.
+- pypdf needs no direct Pillow import here: `image.image` gives size and PNG conversion, JPEG 2000 included. Pillow stays a transitive dependency.
 - **Being listed does not mean a model is usable.** `gemini-2.5-flash` is in `GET /models` and on the pricing page, yet a request returned
   404 "no longer available to new users" in 0.9 s. Trust one real request, not the listing.
 - **The judge is a stopgap: it runs on `nvidia/nemotron-3.5-super-vl:free`, the answerer's model**, so it grades its own work. Others
   failed on 2026-11-06: `xingchen-agi/xing4.0-29b-a4b:free` (error inside HTTP 200, after an earlier upstream 429), `google/gemma-4-31b-it:free`
-  (404 with `response_format`, then 429 with tools). `JudgeVerdict` and `temperature` 0 are not yet proven on nemotron. Prefer another model.
+  (404 with `response_format`, then 429 with tools). nemotron accepted `JudgeVerdict` and `temperature` 0 (19.8 s). Prefer another model.
 - With `LLM_MAX_RETRIES=0` the json_schema to tools switch never runs, so a one-shot test of a model can fail for that reason alone.
 - **A hanging provider is expensive:** with the defaults one call waits about 186 s (3 attempts of 60 s plus backoff) and takes 3
   slots of that provider's daily guard. Long runs must stop on `llm_unavailable` instead of moving to the next item.

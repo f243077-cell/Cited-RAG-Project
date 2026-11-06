@@ -217,7 +217,7 @@ flowchart TD
 1. **Validate** (F-ING-1): extension allow-list, `MAX_UPLOAD_MB`, magic bytes (`%PDF`; PNG and JPEG signatures), non-empty, sanitised name. Store under `data/uploads/<doc_id>.<ext>`.
 2. **Load.** PDF: `pypdf`, one LlamaIndex `Document` per page with metadata `page` (1-based), `doc_id`, `doc_name`, `kind="text"` (verified text extraction). Markdown / TXT: read as text, one Document, `page=None`. DOCX [SHOULD]: LlamaIndex `DocxReader`. Standalone PNG / JPEG: no text chunks; the file itself goes through the image path in step 4 (`page=None`). Empty pages are skipped.
 3. **Chunk.** `SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)`; copy page metadata to each node; set stable IDs.
-4. **Images (F-MM-3).** `page.images` from `pypdf` gives `.data` and `.name` (verified). Skip below `MIN_IMAGE_PX` or `MIN_IMAGE_BYTES`; dedupe by SHA-256; keep at most `MAX_IMAGES_PER_DOC` (largest first). Look up `data/captions/<sha256>.json`; otherwise caption (section 10) and save. Build one `TextNode` per image: text = caption + visible text + key facts; metadata `kind="image"`, `page`, `image_path`. Each caption is one LLM request, so a PDF with many figures can use most of a free-tier day: `MAX_IMAGES_PER_DOC` defaults to 10, `IngestReport` shows the requests used, and the request guard applies to ingestion too.
+4. **Images (F-MM-3).** `page.images` from `pypdf` gives `.data` and `.name` (verified). Skip below `MIN_IMAGE_PX` or `MIN_IMAGE_BYTES`; skip pages 1 and 2 of PDFs with 5 or more pages (covers and logos, about a quarter of the sample images); dedupe by SHA-256; keep at most `MAX_IMAGES_PER_DOC` (largest first). Look up `data/captions/<sha256>.json`; otherwise caption (section 10) and save. Build one `TextNode` per image: text = caption + visible text + key facts; metadata `kind="image"`, `page`, `image_path`. Each caption is one LLM request, so a PDF with many figures can use most of a free-tier day: `MAX_IMAGES_PER_DOC` defaults to 10, `IngestReport` shows the requests used, and the request guard applies to ingestion too.
 5. **Embed and write.** `HuggingFaceEmbedding("BAAI/bge-small-en-v1.5", query_instruction=" ", text_instruction=" ")`, batch size 32. LlamaIndex adds a bge query prefix by default (query and text embeddings of one sentence: cosine 0.951) and `""` does not turn it off, because its code uses `or`. One space does (cosine 1.0, verified), so the same plain embedding serves retrieval and the cache. Write to Chroma and the docstore, update the manifest, recompute `namespace`, invalidate the cache.
 6. **Report** an `IngestReport`. Wrap steps 2 to 5 so a failure leaves the index unchanged (write new nodes only after everything succeeded; delete old chunks last).
 
@@ -398,6 +398,8 @@ Reference code: `cache/semantic_cache.py` and `cache/namespace.py` (Appendix A).
 3. Condense: the user text plus `ImageAnalysis` become the standalone question.
 4. Retrieve with it. In generation the image is passed again as an image content block **before** the text. LangChain's standard block `{"type": "image", "base64": <b64>, "mime_type": "image/png"}` became an OpenAI-style `image_url` content part holding a `data:image/png;base64,...` URL in the verified spike; that is the format OpenRouter takes, and the chosen vision model must list image input.
 5. Citations point at document passages only. The image bypasses the cache (F-MM-6).
+
+The image reaches `generate` on the `strong` role, so `MODEL_STRONG` must accept image input.
 
 **B. Images inside documents** (F-MM-3, F-MM-4). Section 7 step 4. Caption prompt: "Describe this image from a document so it can be found by search. Give a caption, copy all visible text exactly into `visible_text`, give the image type, and list up to 8 key facts (numbers, labels, relationships). Describe only what is visible." Schema: `ImageCaption`. The indexed text is `caption + visible_text + key facts`. In the UI a citation with `kind="image"` renders `st.image(image_path)` beside the caption.
 
@@ -582,7 +584,7 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 
 | Command | Purpose |
 |---|---|
-| `citerag ingest PATH [--index-dir D] [--via-api]` | Ingest a file or folder |
+| `citerag ingest PATH [--index-dir D] [--via-api] [--config F] [--captions]` | Ingest a file or folder. `--captions` costs one LLM request per new image and also fills in missing captions on unchanged documents; uploads through the API always caption |
 | `citerag cache clear` / `cache stats` | Cache admin |
 | `citerag eval retrieval [--golden F] [--index-dir D] [--rerank] [--skip-type T] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
 | `citerag eval explain ITEM_ID [--golden F] [--index-dir D]` | One item: first gold rank for vector, BM25 and hybrid, plus the stored text of its gold pages; zero LLM requests (M2) |
