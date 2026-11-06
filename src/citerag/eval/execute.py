@@ -8,7 +8,9 @@ from pathlib import Path
 
 from citerag.analytics.logs import LogStore
 from citerag.cache.base import NoOpCache
+from citerag.cache.store import PersistentCache
 from citerag.config import Settings
+from citerag.eval.bench import BenchSummary, Spend, WorkloadItem, build_summary, run_both
 from citerag.eval.experiments import Experiment
 from citerag.eval.report import RESULTS_DIR
 from citerag.eval.runner import RunResult, run_config, run_items, score_modes, start_or_resume, to_scores
@@ -95,4 +97,55 @@ def execute_run(
         answers=summarize(result.records) if result and result.records else None,
     )
     (run_dir / "summary.json").write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+    return summary
+
+
+BENCH_NAMESPACE = "bench"
+
+
+def execute_bench(
+    settings: Settings,
+    workload: Path,
+    items: list[WorkloadItem],
+    index_dir: Path,
+    max_requests: int | None,
+    resume: str | None,
+    skip_judge: bool,
+) -> BenchSummary:
+    """Never uses a stored response: that would hide the thing being measured (ARCHITECTURE section 9)."""
+    run_id = resume or f"{datetime.now(UTC):%Y%m%d-%H%M%S}-bench-cache"
+    run_dir = RESULTS_DIR / run_id
+    start_or_resume(run_dir, run_config(settings, workload, "bench-cache"))
+    spend = Spend(max_requests)
+    store = open_store(settings, index_dir)
+    try:
+        retriever = HybridRetriever(store, settings)
+        log = LogStore(settings.logs_db_path)
+        llm = OpenRouterGateway(settings, log)
+        cache = PersistentCache(
+            str(run_dir / "cache.sqlite"),
+            384,
+            settings.cache_threshold,
+            max_entries=settings.cache_max_entries,
+        )
+
+        def deps(backend: NoOpCache | PersistentCache) -> Deps:
+            return Deps(
+                cfg=settings,
+                llm=llm,
+                retriever=retriever,
+                cache=backend,
+                log=log,
+                namespace=lambda: BENCH_NAMESPACE,
+            )
+
+        status, reason = asyncio.run(
+            run_both(items, deps(NoOpCache()), deps(cache), run_dir, spend, skip_judge)
+        )
+    finally:
+        store.close()
+    summary = build_summary(
+        run_id, status, reason, workload, settings.cache_threshold, items, run_dir, spend.used
+    )
+    (run_dir / "bench_summary.json").write_text(summary.model_dump_json(indent=2), encoding="utf-8")
     return summary
