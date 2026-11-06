@@ -1,0 +1,38 @@
+# UNTESTED: the Docker daemon was not running when this was written. See docs/results/M8_test_guide.md.
+# Ports bind to 127.0.0.1 only: this project has no multi-user auth, and it must stay on this machine.
+services:
+  backend:
+    build: .
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./eval/results:/app/eval/results
+      - model_cache:/root/.cache # the embedding model and reranker are large: keep them across rebuilds
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  frontend:
+    build: .
+    command: ["/app/.venv/bin/streamlit", "run", "src/citerag/ui/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    # No env_file: the UI gets the backend address and key only, never the provider keys (F-UI-6)
+    environment:
+      API_BASE_URL: http://backend:8000
+      CITERAG_API_KEY: ${CITERAG_API_KEY:-}
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - ./data:/app/data:ro # citation thumbnails
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  model_cache:

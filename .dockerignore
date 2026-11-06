@@ -1,0 +1,16 @@
+# secrets and local state never enter an image
+.env
+.env.*
+data/
+eval/
+*.sqlite
+# not needed to run
+.git/
+.venv/
+docs/
+tests/
+scripts/
+Claude outputs/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
