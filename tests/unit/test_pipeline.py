@@ -12,7 +12,16 @@ from citerag.errors import BudgetExceededError, StructuredOutputError, Validatio
 from citerag.llm.fake import FakeGateway
 from citerag.rag.context import Chunk
 from citerag.rag.pipeline import Deps, answer_question
-from citerag.schemas import ChatRequest, ChatResponse, LLMCitation, LLMCitedAnswer, StandaloneQuery
+from citerag.schemas import (
+    CacheInfo,
+    ChatRequest,
+    ChatResponse,
+    CitedAnswer,
+    LLMCitation,
+    LLMCitedAnswer,
+    StandaloneQuery,
+    UsageInfo,
+)
 
 TEXT = "Items can be returned within thirty days of delivery."
 CHUNK = Chunk("doc-0000", "doc", "policy.pdf", 3, TEXT)
@@ -41,16 +50,20 @@ class StubRetriever:
 
 class StubCache(NoOpCache):
     def __init__(self, hit=None):
-        self.hit, self.inserted = hit, []
+        self.hit, self.inserted, self.looked_up = hit, [], []
 
     def stats(self):
         return CacheStats(backend="stub", enabled=True)
 
     def lookup(self, q_text, q_emb, namespace, mode="standard", now=None):
+        self.looked_up.append(q_text)
         return self.hit
 
     def insert(self, q_text, q_emb, response_json, namespace, mode="standard", cost_usd=0.0, now=None):
         self.inserted.append(q_text)
+
+    def best_similarity(self, q_emb, namespace, mode="standard", now=None):
+        return 0.61
 
 
 def good(quote=TEXT, answerable=True, marker=1):
@@ -312,3 +325,59 @@ def test_an_answer_kept_after_a_failed_retry_is_never_stored(world):
     llm.queue("generate", StructuredOutputError("no valid answer"))
     ask(make(cache=cache))
     assert cache.inserted == []
+
+
+def test_a_miss_records_the_best_similarity_it_saw(world, settings):
+    llm, make = world
+    llm.queue("generate", good())
+    deps = make(cache=StubCache())
+    response = ask(deps)
+    assert response.cache.enabled and not response.cache.hit and response.cache.similarity == 0.61
+    assert request_rows(deps, settings)[0]["cache_similarity"] == 0.61
+
+
+def test_a_filtered_request_neither_reads_nor_writes_the_cache(world):
+    """A cached answer may cite documents outside the filter, and an answer from a filter is not a general one."""
+    llm, make = world
+    cache = StubCache(hit=object())  # a lookup would crash on this hit
+    llm.queue("generate", good())
+    response = ask(make(cache=cache), doc_ids=["d1"])
+    assert cache.looked_up == [] and cache.inserted == [] and not response.cache.enabled
+
+
+def test_use_cache_false_bypasses_read_and_write(world):
+    llm, make = world
+    cache = StubCache(hit=object())
+    llm.queue("generate", good())
+    ask(make(cache=cache), use_cache=False)
+    assert cache.looked_up == [] and cache.inserted == []
+
+
+def test_a_hit_counts_savings_as_stored_minus_this_request(world):
+    """A follow-up pays for condense, so the hit saves one request less than the stored answer cost."""
+    llm, make = world
+    stored = ChatResponse(
+        request_id="old",
+        session_id="other",
+        standalone_query="stored question",
+        answer=CitedAnswer(answer="Thirty days [1].", answerable=True, confidence="high"),
+        cache=CacheInfo(enabled=True),
+        usage=UsageInfo(llm_requests=2, est_cost_usd=0.5),
+    )
+    deps = make(cache=StubCache(CacheHit(1, 0.97, "stored question", stored.model_dump_json(), 0.5)))
+    deps.log.add_turn("s", "earlier", "answer", "r0")
+    llm.queue("condense", StandaloneQuery(query="How long do I have to return an item?"))
+    response = ask(deps, message="and for that?")
+    assert response.cache.hit and response.usage.llm_requests == 1
+    assert response.cache.saved_requests == 1
+
+
+def test_a_hit_is_still_served_when_the_daily_guard_is_full(world):
+    """F-OPS-2: a first-turn hit needs no LLM call, so the guard has nothing to refuse."""
+    llm, make = world
+    llm.queue("generate", good())
+    first = ask(make())
+    llm.queue("generate", BudgetExceededError("Daily LLM request limit reached"))
+    deps = make(cache=StubCache(CacheHit(1, 0.97, "q", first.model_dump_json(), 0.0)))
+    deps.log.delete_session("s")
+    assert ask(deps).cache.hit

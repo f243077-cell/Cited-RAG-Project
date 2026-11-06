@@ -22,7 +22,7 @@ def test_health_reports_the_m0_fields(settings):
         body["versions"]
     )
     assert body["manifest"] is None and body["namespace"] is None  # nothing ingested yet
-    assert body["cache"] == {"backend": "noop", "enabled": False, "entries": 0}
+    assert body["cache"] == {"backend": "semantic", "enabled": True, "entries": 0}
     assert body["llm_requests_24h"] == 0 and body["max_requests_per_day"] == 40
 
 

@@ -174,8 +174,8 @@ def _from_cache(req: ChatRequest, t: _Trace, hit: CacheHit) -> ChatResponse:
                 hit=True,
                 similarity=hit.similarity,
                 matched_query=hit.query,
-                saved_usd=hit.cost_usd,
-                saved_requests=stored.usage.llm_requests,
+                saved_usd=max(hit.cost_usd - t.usage.est_cost_usd, 0.0),
+                saved_requests=max(stored.usage.llm_requests - t.usage.llm_requests, 0),
             ),
         }
     )
@@ -205,11 +205,20 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
     with t.stage("embed"):
         embedding = await _indexed(d, d.retriever.embed_query, search_query)
 
-    use_cache = req.use_cache and d.cfg.cache_enabled and d.cache.stats().enabled and not picture  # F-MM-6
+    use_cache = (
+        req.use_cache
+        and d.cfg.cache_enabled
+        and d.cache.stats().enabled
+        and not picture  # F-MM-6
+        and req.doc_ids is None  # a stored answer may cite documents outside the filter
+    )
     cache_info = CacheInfo(enabled=use_cache)
     if use_cache:
+        vector, namespace = np.asarray(embedding), d.namespace()
         with t.stage("cache"):
-            hit = d.cache.lookup(question, np.asarray(embedding), d.namespace())
+            hit = d.cache.lookup(question, vector, namespace)
+            if hit is None:  # the dashboard compares this with the threshold (chart 6)
+                cache_info.similarity = d.cache.best_similarity(vector, namespace)
         if hit is not None:
             return _from_cache(req, t, hit)
 

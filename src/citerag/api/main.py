@@ -17,10 +17,11 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from citerag import errors
 from citerag.analytics.logs import LogStore
 from citerag.api.deps import Services, build_services
-from citerag.api.routers import chat, documents, evaluation, health
-from citerag.cache.base import CacheBackend, NoOpCache
+from citerag.api.routers import cache, chat, documents, evaluation, health, logs
+from citerag.cache.base import CacheBackend
+from citerag.cache.store import open_cache
 from citerag.config import Settings, get_settings
-from citerag.ingest.manifest import check_manifest, load_manifest
+from citerag.ingest.manifest import check_manifest, current_namespace, load_manifest
 
 logger = logging.getLogger(__name__)
 _BY_HTTP_STATUS: dict[int, type[errors.CiteRAGError]] = {
@@ -64,7 +65,9 @@ def create_app(
         if manifest is not None:
             check_manifest(manifest, cfg)  # F-ING-4: never serve vectors built with other settings
         app.state.settings = cfg
-        app.state.cache = NoOpCache()
+        app.state.cache = open_cache(cfg)
+        if manifest is not None:  # `citerag ingest` runs with the API stopped, so catch up here (ADR-7)
+            app.state.cache.invalidate_except(current_namespace(cfg, manifest))
         app.state.log = LogStore(cfg.logs_db_path)
         app.state.services = None
         app.state.services_lock = threading.Lock()
@@ -79,6 +82,8 @@ def create_app(
     app.include_router(chat.router)
     app.include_router(documents.router)
     app.include_router(evaluation.router)
+    app.include_router(cache.router)
+    app.include_router(logs.router)
 
     @app.exception_handler(errors.CiteRAGError)
     async def on_typed_error(_: Request, exc: errors.CiteRAGError) -> JSONResponse:

@@ -6,6 +6,7 @@ import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -92,6 +93,9 @@ class RequestRow(BaseModel):
     error_code: str | None = None
 
 
+Row = TypeVar("Row", bound=BaseModel)
+
+
 class LogStore:
     """Opens one connection per call, so any thread can use it."""
 
@@ -152,6 +156,21 @@ class LogStore:
 
     def last_turns(self, session_id: str, turns: int) -> list[Message]:
         return self._fetch(session_id, 2 * turns)
+
+    def _recent(self, table: str, row: type[Row], since: float, limit: int) -> list[Row]:
+        """The newest rows at or after `since`, returned oldest first, so charts read left to right."""
+        names = ", ".join(row.model_fields)
+        query = f"SELECT {names} FROM {table} WHERE ts >= ? ORDER BY ts DESC LIMIT ?"
+        with closing(self._connect()) as db:
+            db.row_factory = sqlite3.Row
+            found = db.execute(query, (since, limit)).fetchall()
+        return [row.model_validate(dict(item)) for item in reversed(found)]
+
+    def recent_requests(self, since: float = 0.0, limit: int = 1000) -> list[RequestRow]:
+        return self._recent("requests", RequestRow, since, limit)
+
+    def recent_llm_calls(self, since: float = 0.0, limit: int = 1000) -> list[LLMCallRow]:
+        return self._recent("llm_calls", LLMCallRow, since, limit)
 
     def delete_session(self, session_id: str) -> None:
         with closing(self._connect()) as db, db:
