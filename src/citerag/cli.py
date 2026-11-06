@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 
-from citerag.config import Settings, get_settings
+from citerag.config import Settings, UISettings, get_settings
 from citerag.errors import CiteRAGError, ValidationFailedError
 
 if TYPE_CHECKING:
@@ -36,8 +36,12 @@ def version() -> None:
 def ingest(
     path: Annotated[Path, typer.Argument(help="A file or a folder")],
     index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
+    via_api: Annotated[bool, typer.Option(help="Send the files to the running backend")] = False,
 ) -> None:
-    """Add documents to the index. Stop the API first: Chroma allows one writer process."""
+    """Add documents to the index. Stop the API first, or use --via-api: Chroma allows one writer process."""
+    if via_api:
+        _ingest_via_api(path)
+        return
     from citerag.index.store import open_store  # loads the heavy frameworks, so not at import time
     from citerag.ingest.pipeline import Ingestor
 
@@ -59,6 +63,33 @@ def ingest(
         typer.echo(f"{f.name}: {f.code}: {f.message}")
     typer.echo(f"{len(reports)} file(s), {sum(r.chunks for r in reports)} chunk(s), {len(failures)} failed")
     if failures:
+        raise typer.Exit(1)
+
+
+def _ingest_via_api(path: Path) -> None:
+    """One upload per file, so one bad file does not stop the others."""
+    from citerag.ingest.loaders import SKIPPED_NAMES
+    from citerag.ui.api_client import ApiClient, ApiError
+
+    if not path.exists():
+        typer.echo(f"not_found: {path} does not exist")
+        raise typer.Exit(1)
+    cfg = UISettings()
+    client = ApiClient(
+        cfg.api_base_url, cfg.citerag_api_key.get_secret_value() if cfg.citerag_api_key else None
+    )
+    files = [path] if path.is_file() else sorted(p for p in path.rglob("*") if p.is_file())
+    failed = 0
+    for file in files:
+        if path.is_dir() and file.name in SKIPPED_NAMES:
+            continue
+        try:
+            for r in client.upload([(file.name, file.read_bytes())]):
+                typer.echo(f"{r.doc_name}: {r.status} ({r.pages or '-'} pages, {r.chunks} chunks)")
+        except ApiError as exc:
+            failed += 1
+            typer.echo(f"{file.name}: {exc.code}: {exc.message}")
+    if failed:
         raise typer.Exit(1)
 
 
