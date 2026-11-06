@@ -1,6 +1,7 @@
 """Query pipeline (ARCHITECTURE section 8): plain async functions, no hidden agent loops.
 
-At most four LLM calls per request: condense, rewrite, generate, regenerate (F-RET-5).
+At most four LLM calls per request: condense, rewrite, generate, regenerate (F-RET-5). Deep mode replaces generate
+with a crew of at least three requests (section 12).
 """
 
 from __future__ import annotations
@@ -50,6 +51,16 @@ R = TypeVar("R")
 NOT_FOUND = "I could not find this in the uploaded documents."
 
 
+@dataclass(frozen=True)
+class DeepAnswer:
+    result: StructuredResult[LLMCitedAnswer]
+    removed_claims: int  # a count, not the text: model text must not reach the warnings unchecked
+
+
+class DeepRunner(Protocol):
+    async def run(self, question: str, passages: list[Passage], request_id: str) -> DeepAnswer: ...
+
+
 class Retriever(Protocol):
     def has_documents(self, doc_ids: list[str] | None = None) -> bool: ...
 
@@ -70,6 +81,7 @@ class Deps:
     namespace: Callable[[], str]
     index_lock: threading.Lock = field(default_factory=threading.Lock)  # uploads and searches take turns
     observe: Callable[[list[Passage], list[Chunk]], None] | None = None  # eval: what the generator saw
+    deep: DeepRunner | None = None  # Deep mode, built only where a crew may run
 
 
 class _Trace:
@@ -118,9 +130,9 @@ async def _indexed(d: Deps, call: Callable[..., R], *args: object) -> R:
     return await asyncio.to_thread(locked)
 
 
-def _reject_unbuilt(req: ChatRequest) -> None:
-    if req.mode != "standard":
-        raise ValidationFailedError("Deep mode arrives in milestone M7")
+def _reject_unavailable(req: ChatRequest, d: Deps) -> None:
+    if req.mode == "deep" and d.deep is None:
+        raise ValidationFailedError("Deep mode is not available here")
 
 
 def assemble(llm_answer: LLMCitedAnswer, citations: list[Citation]) -> tuple[CitedAnswer, list[str]]:
@@ -211,6 +223,7 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
         and d.cache.stats().enabled
         and not picture  # F-MM-6
         and req.doc_ids is None  # a stored answer may cite documents outside the filter
+        and req.mode == "standard"  # F-CAC-4: Deep mode neither reads nor writes
     )
     cache_info = CacheInfo(enabled=use_cache)
     if use_cache:
@@ -245,7 +258,13 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
     by_marker = {p.marker: p for p in passages}
 
     with t.stage("generate"):
-        first = t.add("generate", await generate(d.llm, passages, question, t.request_id, image=picture))
+        if req.mode == "deep":
+            deep = await d.deep.run(question, passages, t.request_id)
+            first = t.add("crew", deep.result)
+            if deep.removed_claims:
+                warnings.append(f"The Fact Checker removed {deep.removed_claims} unsupported claim(s).")
+        else:
+            first = t.add("generate", await generate(d.llm, passages, question, t.request_id, image=picture))
     llm_answer = first.parsed
     with t.stage("verify"):
         citations, citation_warnings = verify_citations(llm_answer.citations, by_marker)
@@ -312,7 +331,7 @@ def _request_row(
         lat_rerank=latency.rerank,
         lat_generate=latency.generate,
         lat_verify=latency.verify,
-        prompt_version=load_prompt("answer").version,
+        prompt_version=load_prompt("deep_writer" if req.mode == "deep" else "answer").version,
         models_json=json.dumps(t.models),
         error_code=error_code,
     )
@@ -335,7 +354,7 @@ def _request_row(
 
 
 async def answer_question(req: ChatRequest, d: Deps) -> ChatResponse:
-    _reject_unbuilt(req)
+    _reject_unavailable(req, d)
     if req.image_b64 is not None:
         validate_image(req.image_b64, req.image_media_type)
     t = _Trace()

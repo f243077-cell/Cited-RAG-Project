@@ -3,6 +3,13 @@ import pytest
 from citerag.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def _no_settings_in_the_environment(monkeypatch):
+    """Importing crewai runs load_dotenv(), so .env would otherwise leak into every test that follows it."""
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     """Isolated settings: no .env file, placeholder model ids, a temp data folder."""

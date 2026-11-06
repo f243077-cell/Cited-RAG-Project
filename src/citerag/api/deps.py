@@ -36,6 +36,8 @@ class Services:
 
 
 def build_services(settings: Settings, log: LogStore, cache: CacheBackend) -> Services:
+    from citerag.agents.deep_mode import DeepCrew
+    from citerag.agents.runtime import CrewRuntime
     from citerag.index.retriever import HybridRetriever
     from citerag.index.store import open_store
     from citerag.ingest.manifest import current_namespace
@@ -59,6 +61,7 @@ def build_services(settings: Settings, log: LogStore, cache: CacheBackend) -> Se
         cache=cache,
         log=log,
         namespace=lambda: current_namespace(settings, ingestor.manifest),
+        deep=DeepCrew(CrewRuntime(settings, llm, log)),
     )
     return Services(deps, store, ingestor, retriever)
 
