@@ -96,6 +96,7 @@ def current_namespace(settings: Settings, manifest: Manifest) -> str:
         "embedding_model": manifest.embedding_model,
         "chunk_size": manifest.chunk_size,
         "chunk_overlap": manifest.chunk_overlap,
+        "images": sum(entry.images for entry in manifest.docs.values()),  # a late caption can change answers
     }
     retrieval = {
         "top_k_retrieve": settings.top_k_retrieve,

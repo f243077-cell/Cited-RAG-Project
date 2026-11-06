@@ -36,7 +36,7 @@ def upload(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> list[IngestReport]:
     loaded = _read_valid(files, settings.max_upload_mb)
-    with services.deps.index_lock:
+    with services.deps.index_lock:  # captions can take minutes; chat waits, but an upload is rare
         reports = [services.ingestor.ingest_bytes(name, data) for name, data in loaded]
         services.retriever.refresh()
     return reports

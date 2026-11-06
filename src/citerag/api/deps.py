@@ -7,6 +7,7 @@ import secrets
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
+import anyio.from_thread
 from fastapi import Depends, Header, Request
 
 from citerag.analytics.logs import LogStore
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
     from citerag.index.retriever import HybridRetriever
     from citerag.index.store import IndexStore
     from citerag.ingest.pipeline import Ingestor
+    from citerag.llm.gateway import StructuredResult
+    from citerag.schemas import ImageCaption
 
 
 @dataclass
@@ -38,13 +41,20 @@ def build_services(settings: Settings, log: LogStore, cache: CacheBackend) -> Se
     from citerag.ingest.manifest import current_namespace
     from citerag.ingest.pipeline import Ingestor
     from citerag.llm.gateway import OpenRouterGateway
+    from citerag.multimodal.vision import caption_image
+
+    llm = OpenRouterGateway(settings, log)
+
+    def caption(data: bytes, media_type: str) -> StructuredResult[ImageCaption]:
+        # Uploads run in a worker thread; this borrows the server's event loop, which owns the LLM client
+        return anyio.from_thread.run(caption_image, llm, data, media_type)
 
     store = open_store(settings, settings.index_dir)
-    ingestor = Ingestor(settings, store, settings.index_dir, cache)
+    ingestor = Ingestor(settings, store, settings.index_dir, cache, caption)
     retriever = HybridRetriever(store, settings)
     deps = Deps(
         cfg=settings,
-        llm=OpenRouterGateway(settings, log),
+        llm=llm,
         retriever=retriever,
         cache=cache,
         log=log,

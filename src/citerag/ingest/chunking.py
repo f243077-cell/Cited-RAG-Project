@@ -7,7 +7,30 @@ from llama_index.core.schema import NodeRelationship, RelatedNodeInfo, TextNode
 
 from citerag.ingest.loaders import LoadedPage
 
-_METADATA_KEYS = ["doc_id", "doc_name", "page", "chunk_index", "kind"]
+_METADATA_KEYS = ["doc_id", "doc_name", "page", "chunk_index", "kind", "image_path"]
+
+
+def image_node(
+    doc_id: str, doc_name: str, sha256: str, text: str, page: int | None, image_path: str
+) -> TextNode:
+    """One chunk per image, so a caption is retrieved and cited like any passage."""
+    metadata: dict[str, str | int] = {
+        "doc_id": doc_id,
+        "doc_name": doc_name,
+        "kind": "image",
+        "image_path": image_path,
+    }
+    if page is not None:
+        metadata["page"] = page
+    node = TextNode(
+        id_=f"{doc_id}-img-{sha256[:8]}",
+        text=text,
+        metadata=metadata,
+        excluded_embed_metadata_keys=_METADATA_KEYS,
+        excluded_llm_metadata_keys=_METADATA_KEYS,
+    )
+    node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(node_id=doc_id)
+    return node
 
 
 def chunk_pages(

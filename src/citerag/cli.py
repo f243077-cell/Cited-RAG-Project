@@ -38,6 +38,7 @@ def ingest(
     index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
     via_api: Annotated[bool, typer.Option(help="Send the files to the running backend")] = False,
     config: Annotated[Path | None, typer.Option(help="Experiment YAML: settings and index folder")] = None,
+    captions: Annotated[bool, typer.Option(help="Caption images: one LLM request per new image")] = False,
 ) -> None:
     """Add documents to the index. Stop the API first, or use --via-api: Chroma allows one writer process."""
     if via_api:
@@ -58,16 +59,27 @@ def ingest(
         raise typer.Exit(1) from exc
     target = index_dir or settings.index_dir
     store = open_store(settings, target)
+    caption, close_captions = None, None
+    if captions:
+        from citerag.analytics.logs import LogStore
+        from citerag.llm.gateway import OpenRouterGateway
+        from citerag.multimodal.vision import blocking_captioner
+
+        llm = OpenRouterGateway(settings, LogStore(settings.logs_db_path))
+        caption, close_captions = blocking_captioner(llm)
     try:
-        reports, failures = Ingestor(settings, store, target).ingest_path(path)
+        reports, failures = Ingestor(settings, store, target, captioner=caption).ingest_path(path)
     except CiteRAGError as exc:
         typer.echo(f"{exc.code}: {exc.message}")
         raise typer.Exit(1) from exc
     finally:
         store.close()
+        if close_captions is not None:
+            close_captions()
     for r in reports:
         typer.echo(
-            f"{r.doc_name}: {r.status} ({r.pages or '-'} pages, {r.chunks} chunks, {r.duration_ms} ms)"
+            f"{r.doc_name}: {r.status} ({r.pages or '-'} pages, {r.chunks} chunks, "
+            f"{r.images_captioned} captioned, {r.images_skipped} images skipped, {r.duration_ms} ms)"
         )
     for f in failures:
         typer.echo(f"{f.name}: {f.code}: {f.message}")
@@ -215,7 +227,7 @@ def eval_run(
             index_dir = index_dir or experiment.index_dir
         target = index_dir or settings.index_dir
         items = load_golden(golden, require_verified=require_verified)
-        leave_out = {*(skip_type or []), "image"}  # image items need the M5 flow
+        leave_out = {*(skip_type or []), *(["image"] if offline else [])}  # needs a vision call
         items = [item for item in items if item.type not in leave_out][:limit]
         _check_index(target, settings)
         summary = execute_run(
