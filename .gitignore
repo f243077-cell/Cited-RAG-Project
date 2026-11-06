@@ -18,3 +18,5 @@ eval/results/
 .DS_Store
 .idea/
 .vscode/
+# local AI tool output
+Claude outputs/
