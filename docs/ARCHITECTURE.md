@@ -587,6 +587,8 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 |---|---|
 | `citerag ingest PATH [--index-dir D] [--via-api] [--config F] [--captions]` | Ingest a file or folder. `--captions` costs one LLM request per new image and also fills in missing captions on unchanged documents; API uploads caption only with `captions=true` |
 | `citerag cache clear` / `cache stats` | Cache admin |
+| `citerag quota` | LLM requests in the last 24 hours against each daily guard; zero LLM requests |
+| `citerag logs purge [--days N]` | Delete rows older than N days (default 30, at least 1, because the guard needs the last day) |
 | `citerag eval retrieval [--golden F] [--index-dir D] [--rerank] [--skip-type T] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
 | `citerag eval explain ITEM_ID [--golden F] [--index-dir D]` | One item: first gold rank for vector, BM25 and hybrid, plus the stored text of its gold pages; zero LLM requests (M2) |
 | `citerag eval run [--golden F] [--config F] [--index-dir D] [--offline] [--rerank] [--limit N] [--max-requests N] [--resume RUN_ID] [--skip-judge] [--skip-type T] [--require-verified]` | Score the system; offline = retrieval metrics only, zero LLM requests; `items.jsonl` is saved after every item; `--skip-judge` keeps answers and `--resume` adds verdicts later; a run stops at once on `llm_unavailable`. `--via-api` and `--llm-disk-cache` are not built |
@@ -692,7 +694,7 @@ Coverage target: at least 80% lines on `cache/`, `rag/verify.py`, `rag/context.p
 
 ## 19. Deployment
 
-Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.13 slim, `uv sync --frozen`), `docker-compose.yml` with `backend` and `frontend` services sharing a `./data` volume, the frontend using `API_BASE_URL=http://backend:8000`. Model downloads (embedder, reranker) are large: cache them in a volume. CPU-only PyTorch is enough; the default Linux wheels pull large CUDA libraries, so check the PyTorch and uv docs for a CPU index if image size matters (not verified here). Cloud deployment is out of scope (Phase 5).
+Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.13 slim, `uv sync --frozen`), `docker-compose.yml` with `backend` and `frontend` services sharing a `./data` volume, the frontend using `API_BASE_URL=http://backend:8000`. **Both are written but untested: the Docker daemon was not running in M8.** `docker compose config` passes. Ports bind to 127.0.0.1, and the frontend gets no `env_file`, so it never holds a provider key. Model downloads (embedder, reranker) are large: cache them in a volume. CPU-only PyTorch is enough; the default Linux wheels pull large CUDA libraries, so check the PyTorch and uv docs for a CPU index if image size matters (not verified here). Cloud deployment is out of scope (Phase 5).
 
 ## 20. Architecture decisions
 
