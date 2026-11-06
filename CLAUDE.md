@@ -37,7 +37,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run uvicorn citerag.api.main:app --reload --port 8000
 uv run streamlit run src/citerag/ui/app.py
 uv run citerag ingest data/sample         # stop the API first (single-writer Chroma) or add --via-api
-uv run citerag ingest data/sample --captions   # one LLM request per new image; also fills in missing captions
+uv run citerag ingest data/sample --captions   # opt-in: one LLM request per new image; also fills in missing captions
 uv run citerag eval retrieval --rerank --skip-type image --index-dir data/index_eval   # hit@k, MRR, zero LLM requests
 uv run citerag eval explain a-017 --index-dir data/index_eval   # one item: ranks per retriever, gold page text
 uv run python scripts/audit_gold_pages.py --index-dir data/index_eval   # pages with the answer's terms that are not gold
@@ -48,6 +48,7 @@ uv run citerag eval run --golden F --index-dir D --skip-judge --max-requests 16 
 uv run citerag eval run --golden F --index-dir D --resume <run_id>   # continue a run, or add missing verdicts
 uv run citerag eval compare <run_a> <run_b>   # delta table; under 3 points is noise
 uv run citerag eval gate <run_id>   # MIN_TOP_SIMILARITY sweep; a proposal, it changes nothing
+uv run citerag eval parts --index-dir data/index_eval   # multi_chunk: hybrid rank of each gold part, zero LLM requests
 uv run citerag ingest data/sample --config configs/experiments/e1_chunk_256.yaml   # build an experiment index
 uv run citerag eval cache-sweep --pairs eval/cache_pairs.jsonl
 uv run citerag eval bench-cache --workload eval/workload.jsonl
@@ -130,6 +131,9 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - The embedding model lands in llama_index's cache (`platformdirs.user_cache_dir("llama_index")`), not `~/.cache/huggingface`.
 - OpenRouter's free list has more than chat models: `openrouter/free` (router), `google/lyria-*` (audio output) and `stealth/*` (no
   `:free` suffix) all show price 0. `scripts/pick_free_models.py` filters them.
+- **A whole-document gold source flatters its rank.** `m-004` part 0 ranks 2 on a chunk with no installer text; the chunk that holds it ranks 4.
+- **Parts follow pages, but content does not.** SSDF p26 holds RV.1.3 and RV.2, and p27 holds RV.2.2 and RV.3, so `m-005` splits by page only.
+- `review_golden.py` compares terms by their first 5 characters, so 800-61r2 and 800-61r3 look identical in a marked sentence.
 - **The relevance gate cannot catch on-topic questions the documents do not answer.** Near-miss unanswerables scored cosine 0.65 to
   0.77 against 0.70 to 0.88 for answerable items, so refusing them is the model's job. `MIN_TOP_SIMILARITY` is provisionally 0.55 and is recalibrated after the verified set.
 - Golden `page` is the stored PDF position from 1 (pypdf), never the printed number; `doc` must equal the stored `doc_name` exactly.
@@ -147,29 +151,32 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   `unknown:<ExceptionType>`, so read that on the next failure before adding a retry.
 - `eval/results` also holds older `*-retrieval` folders with another shape; `list_runs` leaves them out.
 - Not yet verified against real OpenRouter: real rate-limit headers, `data_collection` on the real service.
-- **`gemini-3.8-flash` generated nothing in the spike (2026-11-06), so vision does not work yet.** Through the OpenAI endpoint, four
-  generation requests all hit the client timeout with no HTTP status: structured output at 60 s and 180 s, plain text and an image
-  at 90 s. The hang is not `response_format`. `GET /models` (61 models, 1.6 s) and a POST naming an unknown model (404 in 0.5 s)
-  both work, so network, key and URL are fine. Structured output, images, tool calling and `temperature` are all still unverified.
-  All 5 spike requests are used. The native `generateContent` path was not tried.
-- **While vision is on Gemini, an API upload of a PDF with figures stalls for about 3 minutes** on its first caption, then skips the
-  rest and keeps the text, and the index lock blocks chat meanwhile. Test vision with `PROVIDER_VISION=openrouter
-  MODEL_VISION=nvidia/nemotron-3.5-super-vl:free` in the process environment, which overrides `.env`.
+- **All four roles run on OpenRouter; the Gemini code stays but no role uses it.** A fresh clone needs no Gemini key.
+- **`gemini-3.8-flash` produced no output.** AI Studio showed 504 and 503 with no output tokens (owner's reading). The client saw only
+  timeouts with no HTTP status: structured output at 60 s and 180 s, plain text and an image at 90 s. It is not `response_format`:
+  `GET /models` (61 models, 1.6 s) and a POST naming an unknown model (404 in 0.5 s) both work, so network, key and URL are fine.
+  Structured output, images, tool calling and `temperature` on Gemini are all unverified. The native `generateContent` path was not tried.
+- **Failed Gemini attempts count against the daily limit.** The owner's AI Studio limits for `gemini-3.8-flash` are 5 per minute and 20 per
+  day, so `GEMINI_MAX_REQUESTS_PER_DAY` is 18. `GEMINI_TIMEOUT_S` is 45, and a Gemini timeout or 504 is never retried; a 503 still is.
+- `gemini-2.5-flash` returned 404 "no longer available to new users" in 0.9 s, though it is listed by the API and on the pricing page.
+- A caption is capped at 60 s in total, retries included (`CAPTION_TIMEOUT_S`). The first caption that fails for quota or provider
+  reasons stops the rest for that document; the text still goes in, and a later ingest with captions on fills in the images.
+- **Document captions are opt-in:** the Library toggle, `captions=true` on `POST /v1/documents`, or `citerag ingest --captions`, all off by
+  default because each new image is one free-tier request. A stored caption is free and is used even when the toggle is off.
 - `MODEL_STRONG` must accept images: `generate` sends the attached image to the strong role, not the vision role.
 - **A caption copies an injection into the index by design.** `whiteboard_note.png` put `CANARY-9034` into `visible_text` and `key_facts`,
   so only the untrusted-data rule in the answer prompt keeps it out of the answer. Keep `i-005` in every run.
 - Indexes built before M5 hold no image chunks. `citerag ingest PATH --captions` adds them without re-ingesting the text.
 - pypdf needs no direct Pillow import here: `image.image` gives size and PNG conversion, JPEG 2000 included. Pillow stays a transitive dependency.
-- **Being listed does not mean a model is usable.** `gemini-2.5-flash` is in `GET /models` and on the pricing page, yet a request returned
-  404 "no longer available to new users" in 0.9 s. Trust one real request, not the listing.
+- **Being listed does not mean a model is usable.** Trust one real request, not the listing or a pricing page.
 - **The judge is a stopgap: it runs on `nvidia/nemotron-3.5-super-vl:free`, the answerer's model**, so it grades its own work. Others
   failed on 2026-11-06: `xingchen-agi/xing4.0-29b-a4b:free` (error inside HTTP 200, after an earlier upstream 429), `google/gemma-4-31b-it:free`
   (404 with `response_format`, then 429 with tools). nemotron accepted `JudgeVerdict` and `temperature` 0 (19.8 s). Prefer another model.
 - With `LLM_MAX_RETRIES=0` the json_schema to tools switch never runs, so a one-shot test of a model can fail for that reason alone.
-- **A hanging provider is expensive:** with the defaults one call waits about 186 s (3 attempts of 60 s plus backoff) and takes 3
-  slots of that provider's daily guard. Long runs must stop on `llm_unavailable` instead of moving to the next item.
+- **A hanging OpenRouter model is expensive:** with the defaults one call waits about 186 s (3 attempts of 60 s plus backoff) and takes 3
+  slots of the daily guard. Long runs must stop on `llm_unavailable` instead of moving to the next item.
 - Gemini limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in
-  AI Studio. Google marks free-tier content as used to improve its products.
+  AI Studio. Google marks free-tier content as used to improve its products. The guard counts a rolling 24 hours, not Google's reset.
 - Gemini's OpenAI endpoint returns errors as a list, `[{'error': {...}}]`, not an object; the SDK status code is still right.
 
 ## Conventions

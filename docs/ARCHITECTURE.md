@@ -112,8 +112,8 @@ flowchart LR
   RE --> DS
   CA --> SQ
   PL --> SQ
-  GW -->|"fast, strong, judge"| LLM
-  GW -->|"vision"| GEM
+  GW -->|"all four roles"| LLM
+  GW -.->|"optional, unused"| GEM
   AG --> LLM
   IN --> FS
 ```
@@ -217,7 +217,7 @@ flowchart TD
 1. **Validate** (F-ING-1): extension allow-list, `MAX_UPLOAD_MB`, magic bytes (`%PDF`; PNG and JPEG signatures), non-empty, sanitised name. Store under `data/uploads/<doc_id>.<ext>`.
 2. **Load.** PDF: `pypdf`, one LlamaIndex `Document` per page with metadata `page` (1-based), `doc_id`, `doc_name`, `kind="text"` (verified text extraction). Markdown / TXT: read as text, one Document, `page=None`. DOCX [SHOULD]: LlamaIndex `DocxReader`. Standalone PNG / JPEG: no text chunks; the file itself goes through the image path in step 4 (`page=None`). Empty pages are skipped.
 3. **Chunk.** `SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)`; copy page metadata to each node; set stable IDs.
-4. **Images (F-MM-3).** `page.images` from `pypdf` gives `.data` and `.name` (verified). Skip below `MIN_IMAGE_PX` or `MIN_IMAGE_BYTES`; skip pages 1 and 2 of PDFs with 5 or more pages (covers and logos, about a quarter of the sample images); dedupe by SHA-256; keep at most `MAX_IMAGES_PER_DOC` (largest first). Look up `data/captions/<sha256>.json`; otherwise caption (section 10) and save. Build one `TextNode` per image: text = caption + visible text + key facts; metadata `kind="image"`, `page`, `image_path`. Each caption is one LLM request, so a PDF with many figures can use most of a free-tier day: `MAX_IMAGES_PER_DOC` defaults to 10, `IngestReport` shows the requests used, and the request guard applies to ingestion too.
+4. **Images (F-MM-3).** `page.images` from `pypdf` gives `.data` and `.name` (verified). Skip below `MIN_IMAGE_PX` or `MIN_IMAGE_BYTES`; skip pages 1 and 2 of PDFs with 5 or more pages (covers and logos, about a quarter of the sample images); dedupe by SHA-256; keep at most `MAX_IMAGES_PER_DOC` (largest first). Look up `data/captions/<sha256>.json`; otherwise, **only if captions are switched on for this ingest** (owner decision: opt-in, off by default, because each new image is one free-tier request), caption (section 10) and save. A caption is capped at 60 s in total. Build one `TextNode` per image: text = caption + visible text + key facts; metadata `kind="image"`, `page`, `image_path`. Each caption is one LLM request, so a PDF with many figures can use most of a free-tier day: `MAX_IMAGES_PER_DOC` defaults to 10, `IngestReport` shows the requests used, and the request guard applies to ingestion too.
 5. **Embed and write.** `HuggingFaceEmbedding("BAAI/bge-small-en-v1.5", query_instruction=" ", text_instruction=" ")`, batch size 32. LlamaIndex adds a bge query prefix by default (query and text embeddings of one sentence: cosine 0.951) and `""` does not turn it off, because its code uses `or`. One space does (cosine 1.0, verified), so the same plain embedding serves retrieval and the cache. Write to Chroma and the docstore, update the manifest, recompute `namespace`, invalidate the cache.
 6. **Report** an `IngestReport`. Wrap steps 2 to 5 so a failure leaves the index unchanged (write new nodes only after everything succeeded; delete old chunks last).
 
@@ -420,11 +420,11 @@ The image reaches `generate` on the `strong` role, so `MODEL_STRONG` must accept
 
 The docs grant the higher ceiling from one credit below the threshold (9 today) to absorb fees. `GET /api/v1/key` returns `is_free_tier` and `free_model_daily_requests` (`used`, `limit`, `remaining`); the per-minute limit is not reported there. The unit is the HTTP request, so condense, rewrite, regeneration, each retry, each image caption, each judge call and each CrewAI agent step all count. A negative credit balance can break even free models. Relevant errors: 429 rate limited; 402 insufficient credits (without `Retry-After` it means add credits, not wait); 503 no provider matches your routing needs; 502 model down; and an error can arrive **inside an HTTP 200 body**. Section 13 turns this into a request budget.
 
-**Second provider: Gemini.** Owner decision, 2026-11-06. Gemini is reached through its OpenAI-compatible endpoint (`GEMINI_BASE_URL`, default `https://generativelanguage.googleapis.com/v1beta/openai/`) with the same `ChatOpenAI` client, so parsing, retries and error classification are shared. `PROVIDER_FAST`, `PROVIDER_STRONG`, `PROVIDER_VISION` and `PROVIDER_JUDGE` choose `openrouter` or `gemini` per role; fast, strong and judge run on OpenRouter, vision on Gemini (the judge moved on 2026-11-06, when neither Gemini model tested would generate). Each provider has its own rate limiter (`LLM_MAX_RPM`, `GEMINI_MAX_RPM`) and its own daily guard (`MAX_REQUESTS_PER_DAY`, `GEMINI_MAX_REQUESTS_PER_DAY`), and `llm_calls` gains a `provider` column that the guard filters on. Gemini clients get no OpenRouter `provider` body or attribution headers. `GEMINI_API_KEY` is optional at start-up and checked on the first call from a Gemini role.
+**Second provider: Gemini, built but unused.** Owner decisions, 2026-11-06. Gemini is reached through its OpenAI-compatible endpoint (`GEMINI_BASE_URL`, default `https://generativelanguage.googleapis.com/v1beta/openai/`) with the same `ChatOpenAI` client, so parsing and error classification are shared. `PROVIDER_FAST`, `PROVIDER_STRONG`, `PROVIDER_VISION` and `PROVIDER_JUDGE` choose `openrouter` or `gemini` per role. **All four default to OpenRouter**, because no Gemini model tested produced output, so a fresh clone needs no Gemini key. Each provider has its own rate limiter (`LLM_MAX_RPM`, `GEMINI_MAX_RPM`) and its own daily guard (`MAX_REQUESTS_PER_DAY`, `GEMINI_MAX_REQUESTS_PER_DAY`), and `llm_calls.provider` is what the guard filters on. Gemini clients get no OpenRouter `provider` body or attribution headers. `GEMINI_API_KEY` is optional at start-up and checked on the first call from a Gemini role.
 
-Google's docs (read 2026-11-06) say limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in AI Studio, so the Gemini defaults are low guesses. The guard stays a rolling 24 hours, which is stricter than Google's reset except just after midnight Pacific. The pricing page marks free-tier content as used to improve Google's products, so captioned images and judged passages must be ones the owner is comfortable sharing.
+The owner's AI Studio limits for `gemini-3.8-flash` are 5 requests per minute and 20 per day, and **failed attempts count**, so `GEMINI_MAX_REQUESTS_PER_DAY` is 18. Each Gemini attempt has a 45 s timeout (`GEMINI_TIMEOUT_S`), and a timeout or 504 is never retried; a 503 still is. Google's docs (read 2026-11-06) say limits are per project and per model, and requests per day reset at midnight Pacific. The guard stays a rolling 24 hours. The pricing page marks free-tier content as used to improve Google's products.
 
-**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06: `nvidia/nemotron-3.5-super-vl:free` for fast and strong (verified live) and for judge as a stopgap, so the judge currently grades its own model; `gemini-3.8-flash` for vision (**not working yet**, see the CLAUDE.md gotchas).
+**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06: `nvidia/nemotron-3.5-super-vl:free` for all four roles (verified live on each). The judge should differ from the answerer, so this is a stopgap: it grades its own model.
 
 | Role | Env var | Used for | Must support |
 |---|---|---|---|
@@ -584,12 +584,13 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 
 | Command | Purpose |
 |---|---|
-| `citerag ingest PATH [--index-dir D] [--via-api] [--config F] [--captions]` | Ingest a file or folder. `--captions` costs one LLM request per new image and also fills in missing captions on unchanged documents; uploads through the API always caption |
+| `citerag ingest PATH [--index-dir D] [--via-api] [--config F] [--captions]` | Ingest a file or folder. `--captions` costs one LLM request per new image and also fills in missing captions on unchanged documents; API uploads caption only with `captions=true` |
 | `citerag cache clear` / `cache stats` | Cache admin |
 | `citerag eval retrieval [--golden F] [--index-dir D] [--rerank] [--skip-type T] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
 | `citerag eval explain ITEM_ID [--golden F] [--index-dir D]` | One item: first gold rank for vector, BM25 and hybrid, plus the stored text of its gold pages; zero LLM requests (M2) |
 | `citerag eval run [--golden F] [--config F] [--index-dir D] [--offline] [--rerank] [--limit N] [--max-requests N] [--resume RUN_ID] [--skip-judge] [--skip-type T] [--require-verified]` | Score the system; offline = retrieval metrics only, zero LLM requests; `items.jsonl` is saved after every item; `--skip-judge` keeps answers and `--resume` adds verdicts later; a run stops at once on `llm_unavailable`. `--via-api` and `--llm-disk-cache` are not built |
 | `citerag eval compare RUN_A RUN_B` | Delta table |
+| `citerag eval parts [--golden F] [--index-dir D] [--k N]` | For each `multi_chunk` item, the hybrid rank of each gold part and which parts are missed at k; zero LLM requests |
 | `citerag eval gate RUN_ID` | What each `MIN_TOP_SIMILARITY` would do to a run's cosines; prints a proposal and changes nothing |
 | `citerag eval cache-sweep --pairs eval/cache_pairs.jsonl` | Threshold analysis |
 | `citerag eval bench-cache --workload eval/workload.jsonl` | Cache on/off replay |
@@ -603,7 +604,7 @@ Base path `/v1`, JSON, optional header `X-API-Key` (required only if `CITERAG_AP
 | Method and path | Request | Response | Notes |
 |---|---|---|---|
 | `GET /health` | | versions, manifest, namespace, cache stats, LLM requests in the last 24 hours and the limit | F-OPS-3 |
-| `POST /v1/documents` | multipart `files[]` | `list[IngestReport]` | Synchronous in v1; `invalid_file_type` 415, `file_too_large` 413 |
+| `POST /v1/documents` | multipart `files[]`, optional form field `captions` (default false) | `list[IngestReport]` | Synchronous in v1; `invalid_file_type` 415, `file_too_large` 413 |
 | `GET /v1/documents` | | `list[DocumentInfo]` | |
 | `DELETE /v1/documents/{doc_id}` | | 204 | Recomputes namespace, invalidates cache |
 | `POST /v1/chat` | `ChatRequest` | `ChatResponse` | Image as base64 in JSON |

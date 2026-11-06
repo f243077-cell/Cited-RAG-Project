@@ -131,7 +131,7 @@ Everything in section 5 tagged MUST or SHOULD, plus COULD items if time allows.
 
 - **F-MM-1 [MUST]** The chat accepts an optional image (PNG, JPEG, WebP, at most 5 MB). A vision call returns `ImageAnalysis`; its `search_query` combined with the user text drives retrieval, and the image is also passed to the answer model together with the passages.
 - **F-MM-2 [MUST]** Answers to image questions still cite document passages. The user's image is "your image", never a citable source.
-- **F-MM-3 [MUST]** Ingestion extracts embedded images from PDFs (and accepts standalone images), skips icons (under 100x100 px or under 5 KB) and duplicates (SHA-256), caps at `MAX_IMAGES_PER_DOC` (default 10), captions each with the vision model as `ImageCaption`, and indexes caption plus visible text as a chunk with `kind="image"`, page and `image_path`. Captions are cached on disk by image hash so re-ingesting never pays twice.
+- **F-MM-3 [MUST]** Ingestion extracts embedded images from PDFs (and accepts standalone images), skips icons (under 100x100 px or under 5 KB) and duplicates (SHA-256), caps at `MAX_IMAGES_PER_DOC` (default 10), captions each with the vision model as `ImageCaption` (opt-in per upload, off by default; owner decision 2026-11-06), and indexes caption plus visible text as a chunk with `kind="image"`, page and `image_path`. Captions are cached on disk by image hash so re-ingesting never pays twice.
 - **F-MM-4 [MUST]** A citation to an image chunk shows the image thumbnail next to the caption in the UI.
 - **F-MM-5 [COULD]** Voice question: audio to local Whisper (`faster-whisper`) to text, then the normal flow (OPEN-3).
 - **F-MM-6 [MUST]** Requests that carry an image never read or write the cache.
