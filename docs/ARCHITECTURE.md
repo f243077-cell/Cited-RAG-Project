@@ -112,8 +112,8 @@ flowchart LR
   RE --> DS
   CA --> SQ
   PL --> SQ
-  GW -->|"fast, strong"| LLM
-  GW -->|"vision, judge"| GEM
+  GW -->|"fast, strong, judge"| LLM
+  GW -->|"vision"| GEM
   AG --> LLM
   IN --> FS
 ```
@@ -418,11 +418,11 @@ Reference code: `cache/semantic_cache.py` and `cache/namespace.py` (Appendix A).
 
 The docs grant the higher ceiling from one credit below the threshold (9 today) to absorb fees. `GET /api/v1/key` returns `is_free_tier` and `free_model_daily_requests` (`used`, `limit`, `remaining`); the per-minute limit is not reported there. The unit is the HTTP request, so condense, rewrite, regeneration, each retry, each image caption, each judge call and each CrewAI agent step all count. A negative credit balance can break even free models. Relevant errors: 429 rate limited; 402 insufficient credits (without `Retry-After` it means add credits, not wait); 503 no provider matches your routing needs; 502 model down; and an error can arrive **inside an HTTP 200 body**. Section 13 turns this into a request budget.
 
-**Second provider: Gemini.** Owner decision, 2026-11-06. Gemini is reached through its OpenAI-compatible endpoint (`GEMINI_BASE_URL`, default `https://generativelanguage.googleapis.com/v1beta/openai/`) with the same `ChatOpenAI` client, so parsing, retries and error classification are shared. `PROVIDER_FAST`, `PROVIDER_STRONG`, `PROVIDER_VISION` and `PROVIDER_JUDGE` choose `openrouter` or `gemini` per role; fast and strong start on OpenRouter, vision and judge on Gemini. Each provider has its own rate limiter (`LLM_MAX_RPM`, `GEMINI_MAX_RPM`) and its own daily guard (`MAX_REQUESTS_PER_DAY`, `GEMINI_MAX_REQUESTS_PER_DAY`), and `llm_calls` gains a `provider` column that the guard filters on. Gemini clients get no OpenRouter `provider` body or attribution headers. `GEMINI_API_KEY` is optional at start-up and checked on the first call from a Gemini role.
+**Second provider: Gemini.** Owner decision, 2026-11-06. Gemini is reached through its OpenAI-compatible endpoint (`GEMINI_BASE_URL`, default `https://generativelanguage.googleapis.com/v1beta/openai/`) with the same `ChatOpenAI` client, so parsing, retries and error classification are shared. `PROVIDER_FAST`, `PROVIDER_STRONG`, `PROVIDER_VISION` and `PROVIDER_JUDGE` choose `openrouter` or `gemini` per role; fast, strong and judge run on OpenRouter, vision on Gemini (the judge moved on 2026-11-06, when neither Gemini model tested would generate). Each provider has its own rate limiter (`LLM_MAX_RPM`, `GEMINI_MAX_RPM`) and its own daily guard (`MAX_REQUESTS_PER_DAY`, `GEMINI_MAX_REQUESTS_PER_DAY`), and `llm_calls` gains a `provider` column that the guard filters on. Gemini clients get no OpenRouter `provider` body or attribution headers. `GEMINI_API_KEY` is optional at start-up and checked on the first call from a Gemini role.
 
 Google's docs (read 2026-11-06) say limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in AI Studio, so the Gemini defaults are low guesses. The guard stays a rolling 24 hours, which is stricter than Google's reset except just after midnight Pacific. The pricing page marks free-tier content as used to improve Google's products, so captioned images and judged passages must be ones the owner is comfortable sharing.
 
-**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06: `nvidia/nemotron-3.5-super-vl:free` for fast and strong (verified live), `gemini-3.8-flash` for vision and judge (owner's pick; **not working yet**: every generation request in the spike timed out, see the CLAUDE.md gotchas).
+**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06: `nvidia/nemotron-3.5-super-vl:free` for fast and strong (verified live) and for judge as a stopgap, so the judge currently grades its own model; `gemini-3.8-flash` for vision (**not working yet**, see the CLAUDE.md gotchas).
 
 | Role | Env var | Used for | Must support |
 |---|---|---|---|
@@ -533,6 +533,7 @@ Poisoned fixtures (`eval/fixtures/poisoned/`) contain instructions such as "SYST
 | Metric | Definition |
 |---|---|
 | hit@k | Share of answerable, multi-chunk and image items where any of the top-k chunks passes `is_hit` against `gold_sources` (reported before and after rerank) |
+| Full coverage@k | **Headline for `multi_chunk`:** share of those items with every distinct gold `part` in the top k (`full_coverage_at_k`). Sources with the same `part` are alternatives |
 | MRR@k | Mean of `reciprocal_rank` over the same items |
 | Faithfulness | Share of answerable items where `JudgeVerdict.faithful` is true |
 | Correctness | Share with `correctness == "correct"` (also report correct plus partial) |
@@ -585,8 +586,9 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 | `citerag cache clear` / `cache stats` | Cache admin |
 | `citerag eval retrieval [--golden F] [--index-dir D] [--rerank] [--skip-type T] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
 | `citerag eval explain ITEM_ID [--golden F] [--index-dir D]` | One item: first gold rank for vector, BM25 and hybrid, plus the stored text of its gold pages; zero LLM requests (M2) |
-| `citerag eval run --suite golden [--config F] [--offline] [--via-api] [--limit N] [--max-requests N] [--resume RUN_ID] [--llm-disk-cache]` | Score the system; offline = retrieval metrics only, zero LLM requests; runs append to `items.jsonl` item by item so they can resume |
+| `citerag eval run [--golden F] [--config F] [--index-dir D] [--offline] [--rerank] [--limit N] [--max-requests N] [--resume RUN_ID] [--skip-judge] [--skip-type T] [--require-verified]` | Score the system; offline = retrieval metrics only, zero LLM requests; `items.jsonl` is saved after every item; `--skip-judge` keeps answers and `--resume` adds verdicts later; a run stops at once on `llm_unavailable`. `--via-api` and `--llm-disk-cache` are not built |
 | `citerag eval compare RUN_A RUN_B` | Delta table |
+| `citerag eval gate RUN_ID` | What each `MIN_TOP_SIMILARITY` would do to a run's cosines; prints a proposal and changes nothing |
 | `citerag eval cache-sweep --pairs eval/cache_pairs.jsonl` | Threshold analysis |
 | `citerag eval bench-cache --workload eval/workload.jsonl` | Cache on/off replay |
 | `citerag eval gen-candidates --n 60` | CrewAI question generation |
@@ -922,6 +924,9 @@ class JudgeVerdict(BaseModel):
 class GoldenSource(BaseModel):
     doc: str
     page: int | None = None  # None = any page of that document
+    # Sources with the same `part` are alternatives (any one satisfies the part). A multi_chunk item is fully
+    # covered only when every distinct part is retrieved. Default 0 keeps single-part items unchanged.
+    part: int = 0
 
 
 class GoldenItem(BaseModel):
@@ -1326,6 +1331,29 @@ def is_hit(doc: str, page: int | None, gold: list[GoldenSource]) -> bool:
 def hit_at_k(relevance: list[bool], k: int) -> float:
     """relevance[i] says whether the i-th retrieved chunk is relevant. 1.0 if any of the top k is."""
     return float(any(relevance[:k]))
+
+
+def parts_covered(
+    retrieved: list[tuple[str, int | None]], gold: list[GoldenSource], k: int
+) -> dict[int, bool]:
+    """retrieved = [(doc, page), ...] in rank order. Returns {part: True if any top-k chunk matches a source of that part}."""
+    top = retrieved[:k]
+    parts: dict[int, bool] = {}
+    for g in gold:
+        parts[g.part] = parts.get(g.part, False) or any(is_hit(d, p, [g]) for d, p in top)
+    return parts
+
+
+def coverage_at_k(retrieved: list[tuple[str, int | None]], gold: list[GoldenSource], k: int) -> float:
+    """Share of gold parts found in the top k (0.0 to 1.0). With one part this equals hit@k."""
+    covered = parts_covered(retrieved, gold, k)
+    return sum(covered.values()) / len(covered) if covered else 0.0
+
+
+def full_coverage_at_k(retrieved: list[tuple[str, int | None]], gold: list[GoldenSource], k: int) -> float:
+    """1.0 only if EVERY gold part is found in the top k. The headline metric for multi_chunk items."""
+    covered = parts_covered(retrieved, gold, k)
+    return float(bool(covered) and all(covered.values()))
 
 
 def reciprocal_rank(relevance: list[bool], k: int) -> float:
@@ -2348,7 +2376,7 @@ GEMINI_MAX_REQUESTS_PER_DAY=20                   # low guess; Google's daily quo
 PROVIDER_FAST=openrouter
 PROVIDER_STRONG=openrouter
 PROVIDER_VISION=gemini
-PROVIDER_JUDGE=gemini
+PROVIDER_JUDGE=openrouter
 
 # --- Models (all exist with the needed capabilities in OpenRouter's list on 2026-11-06; none called yet) ---
 # The free list changes often. In M0 run `uv run python scripts/pick_free_models.py` and paste its picks here.
@@ -2356,7 +2384,7 @@ PROVIDER_JUDGE=gemini
 MODEL_FAST=nvidia/nemotron-3.5-super-vl:free
 MODEL_STRONG=nvidia/nemotron-3.5-super-vl:free
 MODEL_VISION=your-gemini-flash-model              # id must belong to PROVIDER_VISION
-MODEL_JUDGE=your-gemini-flash-model               # id must belong to PROVIDER_JUDGE; a different model than the answerer reduces self-preference bias
+MODEL_JUDGE=nvidia/nemotron-3.5-super-vl:free     # stopgap, same as the answerer; a different model reduces self-preference bias
 STRUCTURED_METHOD=auto                           # auto (json_schema, then tools) | json_schema | tools
 
 # --- LLM gateway ---
@@ -2376,7 +2404,7 @@ TOP_K_RETRIEVE=20
 TOP_K_CONTEXT=5
 RERANK_ENABLED=false
 RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
-MIN_TOP_SIMILARITY=0.30                          # placeholder: calibrate in M4 on the unanswerable questions
+MIN_TOP_SIMILARITY=0.55                          # provisional: recalibrated after the verified set
 
 # --- Context and conversation ---
 CONTEXT_TOKEN_BUDGET=6000

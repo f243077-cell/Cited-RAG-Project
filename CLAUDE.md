@@ -40,9 +40,14 @@ uv run citerag ingest data/sample         # stop the API first (single-writer Ch
 uv run citerag eval retrieval --rerank --skip-type image --index-dir data/index_eval   # hit@k, MRR, zero LLM requests
 uv run citerag eval explain a-017 --index-dir data/index_eval   # one item: ranks per retriever, gold page text
 uv run python scripts/audit_gold_pages.py --index-dir data/index_eval   # pages with the answer's terms that are not gold
+uv run python scripts/review_golden.py --out eval/results/golden_review.md   # each item with its gold page text, for human review
 uv run python scripts/pick_free_models.py   # list free models by capability and suggest .env lines (M0)
-uv run citerag eval run --suite golden --offline   # retrieval metrics only, zero LLM requests
-uv run citerag eval run --suite golden --max-requests 35 --resume <run_id>   # spread over free-tier days
+uv run citerag eval run --golden eval/golden/candidates.jsonl --index-dir data/index_eval --offline   # zero LLM requests
+uv run citerag eval run --golden F --index-dir D --skip-judge --max-requests 16   # answers now, verdicts later
+uv run citerag eval run --golden F --index-dir D --resume <run_id>   # continue a run, or add missing verdicts
+uv run citerag eval compare <run_a> <run_b>   # delta table; under 3 points is noise
+uv run citerag eval gate <run_id>   # MIN_TOP_SIMILARITY sweep; a proposal, it changes nothing
+uv run citerag ingest data/sample --config configs/experiments/e1_chunk_256.yaml   # build an experiment index
 uv run citerag eval cache-sweep --pairs eval/cache_pairs.jsonl
 uv run citerag eval bench-cache --workload eval/workload.jsonl
 ```
@@ -125,7 +130,7 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - OpenRouter's free list has more than chat models: `openrouter/free` (router), `google/lyria-*` (audio output) and `stealth/*` (no
   `:free` suffix) all show price 0. `scripts/pick_free_models.py` filters them.
 - **The relevance gate cannot catch on-topic questions the documents do not answer.** Near-miss unanswerables scored cosine 0.65 to
-  0.77 against 0.70 to 0.88 for answerable items, so refusing them is the model's job. Calibrate `MIN_TOP_SIMILARITY` at M4 only.
+  0.77 against 0.70 to 0.88 for answerable items, so refusing them is the model's job. `MIN_TOP_SIMILARITY` is provisionally 0.55 and is recalibrated after the verified set.
 - Golden `page` is the stored PDF position from 1 (pypdf), never the printed number; `doc` must equal the stored `doc_name` exactly.
 - About 10 of the 29 images that pass the size filter sit on cover pages. Look at this in M5: each caption is one LLM request.
 - **BM25's tokenizer drops one-character tokens**, so `PS.1` becomes `ps` and identifiers that differ by a digit look the same.
@@ -133,15 +138,25 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   answer. Audit gold pages with `scripts/audit_gold_pages.py`: an exact phrase missed page 3 for `a-007`.
 - **BM25 pads its results with score-0 chunks** that match no query term, and rank fusion rewards those ranks. Keep the
   `_MatchingBM25` wrapper in `index/retriever.py`.
-- **The relevance gate does not refuse off-topic questions at 0.30:** "What is the capital of France?" scored cosine 0.411, so the
-  model did the refusing. Keep counting that as a model decision until M4 calibrates `MIN_TOP_SIMILARITY`.
+- **A gate refusal is not free:** below `MIN_TOP_SIMILARITY` the pipeline spends one rewrite request before refusing. At 0.55 an
+  off-topic question such as "What is the capital of France?" (cosine 0.411) now takes that path; at 0.30 the model refused it.
 - Streamlit logs two 404s for `<page>/_stcore/health` and `host-config` on a direct page URL such as `/Chat`. They are harmless.
+- **`generate` can fail with an unclassified exception** (`error_kind` `unknown`, no HTTP status, 22 to 35 s in): it happened twice on
+  "what is the risk of using AI" and passed on the next try, so the cause is unknown. `unknown` does not retry. `llm_calls` now records
+  `unknown:<ExceptionType>`, so read that on the next failure before adding a retry.
+- `eval/results` also holds older `*-retrieval` folders with another shape; `list_runs` leaves them out.
 - Not yet verified against real OpenRouter: real rate-limit headers, `data_collection` on the real service.
 - **`gemini-3.8-flash` generated nothing in the spike (2026-11-06), so vision and judge do not work yet.** Through the OpenAI
   endpoint, three generation requests all hit the client timeout with no HTTP status: structured output at 60 s and 180 s, plain
   text at 90 s. The hang is not `response_format`. `GET /models` (61 models, 1.6 s) and a POST naming an unknown model (404 in 0.5 s)
   both work, so network, key and URL are fine. Structured output, images, tool calling and `temperature` are all still unverified.
   Requests used: 4 of 5. The native `generateContent` path was not tried.
+- **Being listed does not mean a model is usable.** `gemini-2.5-flash` is in `GET /models` and on the pricing page, yet a request returned
+  404 "no longer available to new users" in 0.9 s. Trust one real request, not the listing.
+- **The judge is a stopgap: it runs on `nvidia/nemotron-3.5-super-vl:free`, the answerer's model**, so it grades its own work. Others
+  failed on 2026-11-06: `xingchen-agi/xing4.0-29b-a4b:free` (error inside HTTP 200, after an earlier upstream 429), `google/gemma-4-31b-it:free`
+  (404 with `response_format`, then 429 with tools). `JudgeVerdict` and `temperature` 0 are not yet proven on nemotron. Prefer another model.
+- With `LLM_MAX_RETRIES=0` the json_schema to tools switch never runs, so a one-shot test of a model can fail for that reason alone.
 - **A hanging provider is expensive:** with the defaults one call waits about 186 s (3 attempts of 60 s plus backoff) and takes 3
   slots of that provider's daily guard. Long runs must stop on `llm_unavailable` instead of moving to the next item.
 - Gemini limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in
