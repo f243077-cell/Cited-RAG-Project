@@ -56,6 +56,9 @@ uv run citerag eval cache-sweep --pairs eval/cache_pairs.jsonl   # labelled pair
 uv run python scripts/make_workload.py    # golden questions plus labelled paraphrases
 uv run citerag eval bench-cache --workload eval/workload.jsonl --index-dir data/index_eval --estimate   # cost only
 uv run citerag eval bench-cache --workload eval/workload.jsonl --index-dir data/index_eval --max-requests 30   # uses quota
+uv run citerag eval gen-candidates --n 12 --index-dir data/index_eval --max-requests 8   # uses quota; add --estimate for the cost only
+uv run citerag eval analyze-failures <run_id>   # 1 LLM request, none if nothing failed
+uv run citerag eval run --golden F --config configs/experiments/e7_deep.yaml --max-requests 30   # at least 3 requests per item
 ```
 
 ## Stack (tested together on 2026-11-06, Python 3.13; exact versions in ARCHITECTURE section 3 and `uv.lock`)
@@ -84,7 +87,7 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
    Pydantic models or plain values.
 2. **One LLM gateway.** Every LLM call except CrewAI runs through `llm/gateway.py` (logs tokens, requests, shadow dollars and
    latency to `llm_calls`). The gateway parses model output itself (`llm/parse.py`) and retries itself. For CrewAI runs, reserve
-   limiter slots, use one `LLM` object per agent, and write one `llm_calls` row from the crew's token usage.
+   limiter slots, use one `LLM` object per agent, and write one `llm_calls` row per request from the crew's token usage.
 3. **Pydantic at every boundary**, including LLM outputs (`with_structured_output`). Model-facing schemas stay minimal
    (`LLMCitedAnswer`); code adds the verified fields (`CitedAnswer`).
 4. **Verify, never trust.** Citations are checked against passages (`verify_citations`); cache hits pass `guard_ok`;
@@ -186,6 +189,15 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - **`guard_ok` sees digits and a short word list only:** "first" vs "second", "days" vs "hours" and "leave out" all pass it. Only the threshold stops those.
 - A request with `doc_ids` bypasses the cache: a stored answer may cite documents outside the filter.
 - `eval/results/cache_sweep/sweep.json` is what the Dashboard shows. Delete it after any trial sweep, or trial numbers look real.
+- **Deep mode costs at least 3 requests per question** (1 for standard), and 5 when the rewrite and the citation retry both run. It never reads or writes the cache.
+- **The guard counts `llm_calls` rows, so a crew writes one row per request**, not one per crew as first designed. A failed crew writes every reserved slot.
+- **CrewAI retries a failed task twice by default, outside the guard** (`max_retry_limit`). `agent_limits()` sets it to 0.
+- **CrewAI retries a 429 twice inside one LLM call** (`llms/retry.py`, a constant, up to 8 s backoff), so a rate-limited task spends 3 requests and ignores `Retry-After`. Failed attempts are not in `successful_requests`; `runtime.py` adds 2 rows on a rate-limit failure.
+- **Importing `crewai` runs `load_dotenv()`**, so `.env` lands in `os.environ` for the whole process and beats `_env_file=None` in tests. `tests/conftest.py` clears every setting name per test.
+- **CrewAI exception chains can be circular**: never walk `__context__` without a seen set. Mine hung here.
+- **CrewAI parses strictly.** One non-JSON reply raises `RuntimeError` wrapping a `ValidationError`; `llm/parse.py` is not used, so a fenced reply can pass in standard mode and fail in a crew. Not yet seen on a real model: no crew has run live.
+- **CrewAI assumes 8,192 tokens for an unknown model** and summarises above it, which would rewrite passages. `respect_context_window=False` turns that off.
+- CrewAI takes `max_retries`, `default_headers`, `extra_body`, `base_url` and `api_key` on `LLM`, so the key need not sit in the environment.
 - Gemini's OpenAI endpoint returns errors as a list, `[{'error': {...}}]`, not an object; the SDK status code is still right.
 
 ## Conventions

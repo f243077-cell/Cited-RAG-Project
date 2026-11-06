@@ -144,7 +144,7 @@ citerag/
 │  ├─ rag/               condense.py   context.py*   generate.py   verify.py*   pipeline.py
 │  ├─ cache/             base.py   store.py   semantic_cache.py*   namespace.py*
 │  ├─ multimodal/        vision.py   audio.py
-│  ├─ agents/            schemas.py*   deep_mode.py   eval_crews.py
+│  ├─ agents/            schemas.py*   runtime.py   deep_mode.py   eval_crews.py
 │  ├─ eval/              golden.py   metrics.py*   retrieval.py   judge.py   ragas_runner.py   runner.py   report.py   cache_tools.py   bench.py
 │  ├─ analytics/         logs.py   plots.py
 │  ├─ api/               main.py   deps.py   routers/{chat,documents,cache,logs,eval,health}.py
@@ -486,7 +486,7 @@ CrewAI is **off the hot path**: it serves Deep mode and offline evaluation helpe
 
 The pipeline then runs `verify_citations` on `revised`, exactly as in standard mode. Deep mode never reads or writes the cache.
 
-**Evaluation crews** (F-AGT-2): (a) Question Writer plus Question Critic read sampled chunks and output `QACandidateList`; only `critic_ok` items are written to `candidates.jsonl`, with `verified=false` until a human accepts them. (b) Failure Analyst reads failed eval items (question, gold answer, retrieved sources, answer, verdict) and outputs `FailureAnalysis` (causes: `retrieval_miss`, `chunking`, `prompt`, `hallucination`, `citation_error`, `refusal_error`, `injection`, `other`).
+**Evaluation crews** (F-AGT-2): (a) Question Writer plus Question Critic read sampled text chunks and output `QACandidateList`; only `critic_ok` items whose document and page were in the batch are written to `candidates.jsonl`, with `verified=false` until a human accepts them. (b) Failure Analyst reads failed eval items (question, gold answer, retrieved sources, answer, verdict) and outputs `FailureAnalysis` (causes: `retrieval_miss`, `chunking`, `prompt`, `hallucination`, `citation_error`, `refusal_error`, `injection`, `other`).
 
 **Sketch** (verified against a fake OpenAI-compatible server: `LLM(model="openrouter/<id>")`, `Agent`, `Task`, `Crew`, `Process.sequential`, `kickoff(inputs=...)`, three chained tasks with `context=[...]` and `output_pydantic`, `max_iter`, `max_execution_time`; a 3-task crew made exactly 3 HTTP requests):
 
@@ -516,7 +516,7 @@ def build_deep_crew(cfg) -> Crew:
 # result = crew.kickoff(inputs={"question": q, "passages": render_passages(passages)}); report = result.pydantic
 ```
 
-CrewAI's own LLM objects bypass the gateway, so wrap each run: reserve slots with `limiter.try_acquire(n)` (a 3-task crew needs at least 3; CrewAI may add retries), time the run, take usage from `CrewOutput.token_usage` (`total_tokens`, `prompt_tokens`, `completion_tokens`, `successful_requests`), convert to shadow dollars, and write one `llm_calls` row with role `crew` and the request count. **Use one `LLM` object per agent**: verified that when three agents share one `LLM` object, `token_usage` reported 9 requests and 162 tokens for what was really 3 requests and 54 tokens, while separate objects reported exactly 3. Deep mode therefore costs at least 3 requests per question, versus 1 for standard mode.
+CrewAI's own LLM objects bypass the gateway, so `agents/runtime.py` wraps each run: it checks the daily guard for one slot per task and reserves that many limiter slots (`OpenRouterGateway.reserve`), times the run, takes usage from `CrewOutput.token_usage`, converts it to shadow dollars, and writes `llm_calls` rows with role `crew`. **It writes one row per request, not one per crew:** the daily guard counts rows, so a single row would count a Deep question as one request. Tokens go on the first row. A failed crew reports no usage, so every reserved slot is written as a failed row, which errs towards the stricter guard. Crews run on OpenRouter only and send the same routing body and headers as the gateway, with `max_retries=0` and `max_retry_limit=0`, because CrewAI would otherwise rerun a failed task twice outside the guard. Agents set `respect_context_window=False`: with an unknown model CrewAI assumes 8,192 tokens and would summarise the passages. CrewAI parses output strictly, without `llm/parse.py`, so a model that fences its JSON fails in a crew even if it works in standard mode. The Fact Checker sees the evidence table and the draft (`context=[evidence, answer]`). **Use one `LLM` object per agent**: verified that when three agents share one `LLM` object, `token_usage` reported 9 requests and 162 tokens for what was really 3 requests and 54 tokens, while separate objects reported exactly 3. Deep mode therefore costs at least 3 requests per question, versus 1 for standard mode.
 
 ## 13. Evaluation
 
@@ -595,8 +595,8 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 | `citerag eval gate RUN_ID` | What each `MIN_TOP_SIMILARITY` would do to a run's cosines; prints a proposal and changes nothing |
 | `citerag eval cache-sweep [--pairs F] [--max-false-hit-rate X] [--chart F]` | Threshold analysis on labelled pairs; prints a recommendation and changes nothing; zero LLM requests |
 | `citerag eval bench-cache [--workload F] [--index-dir D] [--max-requests N] [--resume RUN_ID] [--skip-judge] [--estimate] [--report F]` | Cache on/off replay; `--estimate` prints the request cost and stops |
-| `citerag eval gen-candidates --n 60` | CrewAI question generation |
-| `citerag eval analyze-failures RUN_ID` | CrewAI failure analysis |
+| `citerag eval gen-candidates [--n N] [--index-dir D] [--out F] [--seed S] [--max-requests N] [--estimate]` | Question Writer plus Critic: 2 requests per batch of up to 3 questions; appends `q-NNN` items with `verified=false` |
+| `citerag eval analyze-failures RUN_ID [--out F] [--estimate]` | Failure Analyst: 1 request, none if nothing failed; writes `docs/results/failure_analysis.md` |
 
 ## 14. API
 
