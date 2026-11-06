@@ -9,6 +9,7 @@ def settings(tmp_path) -> Settings:
     return Settings(
         _env_file=None,
         openrouter_api_key="test-key",
+        gemini_api_key="test-gemini-key",
         model_fast="vendor/fast:free",
         model_strong="vendor/strong:free",
         model_vision="vendor/vision:free",

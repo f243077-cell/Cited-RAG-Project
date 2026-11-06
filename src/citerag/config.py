@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+Provider = Literal["openrouter", "gemini"]
+
 
 class Settings(BaseSettings):
     # env_ignore_empty: a blank line such as LLM_TEMPERATURE= means "use the default"
@@ -20,6 +22,16 @@ class Settings(BaseSettings):
     openrouter_title: str = "CiteRAG"
     openrouter_require_parameters: bool = True
     openrouter_data_collection: Literal["allow", "deny"] = "allow"
+
+    gemini_api_key: SecretStr | None = None  # checked when a gemini role makes its first call
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_max_rpm: int = 5
+    gemini_max_requests_per_day: int = 20
+
+    provider_fast: Provider = "openrouter"
+    provider_strong: Provider = "openrouter"
+    provider_vision: Provider = "gemini"
+    provider_judge: Provider = "gemini"
 
     # Model ids change often, so they have no default in code (F-OPS-7): they come from .env only.
     model_fast: str
@@ -78,6 +90,15 @@ class Settings(BaseSettings):
     @property
     def logs_db_path(self) -> Path:
         return self.data_dir / "logs" / "app.sqlite"
+
+
+class UISettings(BaseSettings):
+    """What the Streamlit process needs. It never sees the OpenRouter key (F-UI-6)."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
+
+    api_base_url: str = "http://localhost:8000"
+    citerag_api_key: SecretStr | None = None
 
 
 @lru_cache

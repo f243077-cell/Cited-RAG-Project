@@ -8,10 +8,19 @@ from tests.fake_openai_server import FakeOpenRouter
 SAMPLING = {"temperature", "top_p", "top_k"}
 
 
+def _all_openrouter(settings, srv, **extra):
+    update = {
+        "openrouter_base_url": srv.base_url,
+        "provider_vision": "openrouter",
+        "provider_judge": "openrouter",
+    }
+    return settings.model_copy(update={**update, **extra})
+
+
 @pytest.mark.parametrize("role", ROLES)
 def test_role_client_sends_no_sampling_parameters(settings, role):
     with FakeOpenRouter() as srv:
-        cfg = settings.model_copy(update={"openrouter_base_url": srv.base_url, "judge_temperature": None})
+        cfg = _all_openrouter(settings, srv, judge_temperature=None)
         client = build_client(cfg, role)
         client.invoke("q")
         body, headers = srv.requests[0], srv.headers[0]
@@ -24,7 +33,7 @@ def test_role_client_sends_no_sampling_parameters(settings, role):
 
 def test_only_the_judge_gets_the_configured_judge_temperature(settings):
     with FakeOpenRouter() as srv:
-        cfg = settings.model_copy(update={"openrouter_base_url": srv.base_url})
+        cfg = _all_openrouter(settings, srv)
         assert cfg.judge_temperature == 0
         build_client(cfg, "judge").invoke("q")
         build_client(cfg, "strong").invoke("q")
