@@ -142,6 +142,12 @@ class OpenRouterGateway:
         self._clients: dict[str, ChatOpenAI] = {}
         self._methods: dict[str, str] = {}  # per model, once one method has failed
 
+    async def reserve(self, provider: Provider, n: int) -> None:
+        """For a crew, which calls the provider outside this class: guard first, then n limiter slots."""
+        check_budget(self._cfg.logs_db_path, self._daily_limits[provider], provider=provider, need=n)
+        while (wait := self._limiters[provider].try_acquire(n)) > 0:
+            await self._sleep(wait)
+
     def _client(self, role: str) -> ChatOpenAI:
         if role not in self._clients:
             self._clients[role] = build_client(self._cfg, role)
