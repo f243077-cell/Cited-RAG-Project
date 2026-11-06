@@ -6,6 +6,8 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
+from citerag.agents.deep_mode import DeepCrew
+from citerag.agents.runtime import CrewRuntime
 from citerag.analytics.logs import LogStore
 from citerag.cache.base import NoOpCache
 from citerag.cache.store import PersistentCache
@@ -49,7 +51,7 @@ def execute_run(
     run_id = resume or f"{datetime.now(UTC):%Y%m%d-%H%M%S}-{name}"
     run_dir = RESULTS_DIR / run_id
     start_or_resume(run_dir, run_config(settings, golden, name if experiment else None))
-    mode = experiment.retrieval if experiment else "hybrid"
+    ranking = experiment.retrieval if experiment else "hybrid"
     score_rerank = rerank or (experiment.rerank if experiment else False)
 
     result: RunResult | None = None
@@ -64,19 +66,22 @@ def execute_run(
         if score_rerank:
             on = settings.model_copy(update={"rerank_enabled": True})
             reranked = HybridRetriever(store, on).retrieve
-        rank = _ranker(retriever, mode, settings.top_k_retrieve)
+        rank = _ranker(retriever, ranking, settings.top_k_retrieve)
         before, after = score_modes(items, rank, cosine, reranked, settings.top_k_context)
         if not offline:
             log = LogStore(settings.logs_db_path)
+            llm = OpenRouterGateway(settings, log)
+            mode = experiment.mode if experiment else "standard"
             deps = Deps(
                 cfg=settings,
-                llm=OpenRouterGateway(settings, log),
+                llm=llm,
                 retriever=retriever,
                 cache=NoOpCache(),
                 log=log,
                 namespace=lambda: "eval",
+                deep=DeepCrew(CrewRuntime(settings, llm, log)) if mode == "deep" else None,
             )
-            result = asyncio.run(run_items(items, deps, run_dir, max_requests, skip_judge))
+            result = asyncio.run(run_items(items, deps, run_dir, max_requests, skip_judge, mode))
     finally:
         store.close()
 

@@ -34,6 +34,7 @@ from citerag.schemas import ChatRequest, GoldenItem, ItemRecord, RetrievalScores
 
 WORST_ANSWER_REQUESTS = 3  # rewrite, generate, regenerate; a first turn has no condense
 WORST_IMAGE_REQUESTS = 5  # adds image analysis and condense
+WORST_DEEP_REQUESTS = 5  # three agent tasks, rewrite, regenerate
 _MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 _SECRETS = {"openrouter_api_key", "gemini_api_key", "citerag_api_key"}
 _FINGERPRINT = ("model_fast", "model_strong", "model_judge", "provider_strong", "provider_judge")
@@ -147,7 +148,7 @@ def _image_fields(item: GoldenItem) -> dict[str, str]:
     }
 
 
-async def _answer_item(item: GoldenItem, deps: Deps, run_id: str) -> ItemRecord:
+async def _answer_item(item: GoldenItem, deps: Deps, run_id: str, mode: str) -> ItemRecord:
     seen: dict[str, str | list[str]] = {"context": "", "retrieved": []}
 
     def observe(passages: list[Passage], chunks: list[Chunk]) -> None:
@@ -155,7 +156,9 @@ async def _answer_item(item: GoldenItem, deps: Deps, run_id: str) -> ItemRecord:
 
     deps.observe = observe
     session = f"eval-{run_id}-{item.id}-{uuid.uuid4().hex[:8]}"  # no history crosses items or resumes
-    request = ChatRequest(session_id=session, message=item.question, use_cache=False, **_image_fields(item))
+    request = ChatRequest(
+        session_id=session, message=item.question, use_cache=False, mode=mode, **_image_fields(item)
+    )
     response = await answer_question(request, deps)
     return _base_record(
         item,
@@ -174,6 +177,7 @@ async def run_items(
     run_dir: Path,
     max_requests: int | None = None,
     skip_judge: bool = False,
+    mode: str = "standard",
 ) -> RunResult:
     records = load_records(run_dir)
     spent = 0
@@ -188,10 +192,11 @@ async def run_items(
     for item in items:
         record = records.get(item.id)
         if record is None or record.status == "error":
-            if over_cap(WORST_IMAGE_REQUESTS if item.image_path else WORST_ANSWER_REQUESTS):
+            worst = WORST_IMAGE_REQUESTS if item.image_path else WORST_ANSWER_REQUESTS
+            if over_cap(WORST_DEEP_REQUESTS if mode == "deep" else worst):
                 return result("paused", f"--max-requests {max_requests} reached")
             try:
-                record = await _answer_item(item, deps, run_dir.name)
+                record = await _answer_item(item, deps, run_dir.name, mode)
             except BudgetExceededError as exc:
                 return result("paused", exc.message)
             except LLMUnavailableError as exc:

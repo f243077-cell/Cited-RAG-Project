@@ -355,3 +355,15 @@ def test_a_cached_answer_shows_the_badge_with_its_similarity(monkeypatch):
         and "similarity 0.97" in captions
         and "1 LLM requests saved" in captions
     )
+
+
+def test_deep_mode_is_off_by_default_warns_of_the_cost_and_is_sent(monkeypatch):
+    client = StubClient(response())
+    app = run_page(monkeypatch, "1_Chat.py", client)
+    assert app.toggle[1].label == "Deep mode" and app.toggle[1].value is False
+    app.chat_input[0].set_value("q").run()
+    assert client.requests[-1].mode == "standard"
+    app.toggle[1].set_value(True).run()
+    assert any("at least 3 LLM requests" in c.value for c in app.caption)
+    app.chat_input[0].set_value("r").run()
+    assert client.requests[-1].mode == "deep"

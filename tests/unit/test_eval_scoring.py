@@ -136,7 +136,7 @@ def test_every_experiment_file_loads(settings):
     from pathlib import Path
 
     files = sorted((Path(__file__).resolve().parents[2] / "configs" / "experiments").glob("*.yaml"))
-    assert len(files) == 11
+    assert len(files) == 13
     for path in files:
         experiment = load_experiment(path)
         assert isinstance(experiment, Experiment) and experiment.name == path.stem

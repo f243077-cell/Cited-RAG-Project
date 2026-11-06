@@ -30,6 +30,11 @@ with st.sidebar:
     use_cache = st.toggle(
         "Use cache", value=True, help="Off skips the cache for this question: no lookup and nothing stored."
     )
+    deep_mode = st.toggle(
+        "Deep mode", value=False, help="Three agents check the answer. Slower, and it skips the cache."
+    )
+    if deep_mode:
+        st.caption("Deep mode costs at least 3 LLM requests per question, against 1 for standard.")
     if st.button("New chat"):
         try:
             client.delete_session(state.session_id)
@@ -70,6 +75,7 @@ if submitted:
         message=question,
         doc_ids=selected or None,
         use_cache=use_cache,
+        mode="deep" if deep_mode else "standard",
         **image_fields,
     )
     with st.chat_message("assistant"):
