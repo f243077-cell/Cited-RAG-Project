@@ -50,8 +50,12 @@ uv run citerag eval compare <run_a> <run_b>   # delta table; under 3 points is n
 uv run citerag eval gate <run_id>   # MIN_TOP_SIMILARITY sweep; a proposal, it changes nothing
 uv run citerag eval parts --index-dir data/index_eval   # multi_chunk: hybrid rank of each gold part, zero LLM requests
 uv run citerag ingest data/sample --config configs/experiments/e1_chunk_256.yaml   # build an experiment index
-uv run citerag eval cache-sweep --pairs eval/cache_pairs.jsonl
-uv run citerag eval bench-cache --workload eval/workload.jsonl
+uv run citerag cache stats                # or: cache clear
+uv run python scripts/review_cache_pairs.py --label   # a human labels the candidates into eval/cache_pairs.jsonl
+uv run citerag eval cache-sweep --pairs eval/cache_pairs.jsonl   # labelled pairs only, zero LLM requests, changes nothing
+uv run python scripts/make_workload.py    # golden questions plus labelled paraphrases
+uv run citerag eval bench-cache --workload eval/workload.jsonl --index-dir data/index_eval --estimate   # cost only
+uv run citerag eval bench-cache --workload eval/workload.jsonl --index-dir data/index_eval --max-requests 30   # uses quota
 ```
 
 ## Stack (tested together on 2026-11-06, Python 3.13; exact versions in ARCHITECTURE section 3 and `uv.lock`)
@@ -177,6 +181,11 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   slots of the daily guard. Long runs must stop on `llm_unavailable` instead of moving to the next item.
 - Gemini limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in
   AI Studio. Google marks free-tier content as used to improve its products. The guard counts a rolling 24 hours, not Google's reset.
+- **`SemanticCache` defines `__len__`, so an empty cache is falsy.** `cache or NoOpCache()` silently replaced it, and uploads stopped invalidating. Compare with `None`.
+- **The placeholder `CACHE_THRESHOLD` of 0.92 is not safe.** On the 80 candidate pairs with the drafter's proposed labels (a smoke run, not a result), 14 of 43 near misses reached 0.92 and passed the guard. bge-small puts "How many hours..." and "How many days..." at 0.97.
+- **`guard_ok` sees digits and a short word list only:** "first" vs "second", "days" vs "hours" and "leave out" all pass it. Only the threshold stops those.
+- A request with `doc_ids` bypasses the cache: a stored answer may cite documents outside the filter.
+- `eval/results/cache_sweep/sweep.json` is what the Dashboard shows. Delete it after any trial sweep, or trial numbers look real.
 - Gemini's OpenAI endpoint returns errors as a list, `[{'error': {...}}]`, not an object; the SDK status code is still right.
 
 ## Conventions

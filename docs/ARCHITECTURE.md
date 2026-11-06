@@ -132,7 +132,7 @@ citerag/
 │  ├─ index/chroma/   index/store/          (docstore JSON + manifest.json)
 │  ├─ cache/semantic_cache.sqlite
 │  └─ logs/app.sqlite
-├─ eval/               golden/{golden,candidates}.jsonl   cache_pairs.jsonl   workload.jsonl
+├─ eval/               golden/{golden,candidates}.jsonl   cache_pairs.candidates.jsonl   cache_pairs.jsonl   workload.jsonl
 │                      fixtures/{poisoned,images}/        results/<run_id>/
 ├─ scripts/            fetch_sample.py   pick_free_models.py
 ├─ src/citerag/
@@ -142,10 +142,10 @@ citerag/
 │  ├─ ingest/            loaders.py   images.py   chunking.py   pipeline.py   manifest.py
 │  ├─ index/             store.py   retriever.py
 │  ├─ rag/               condense.py   context.py*   generate.py   verify.py*   pipeline.py
-│  ├─ cache/             base.py   semantic_cache.py*   namespace.py*
+│  ├─ cache/             base.py   store.py   semantic_cache.py*   namespace.py*
 │  ├─ multimodal/        vision.py   audio.py
 │  ├─ agents/            schemas.py*   deep_mode.py   eval_crews.py
-│  ├─ eval/              golden.py   metrics.py*   retrieval.py   judge.py   ragas_runner.py   runner.py   report.py   cache_tools.py
+│  ├─ eval/              golden.py   metrics.py*   retrieval.py   judge.py   ragas_runner.py   runner.py   report.py   cache_tools.py   bench.py
 │  ├─ analytics/         logs.py   plots.py
 │  ├─ api/               main.py   deps.py   routers/{chat,documents,cache,logs,eval,health}.py
 │  └─ ui/                app.py   api_client.py   pages/{1_Chat,2_Library,3_Dashboard,4_Evaluation}.py
@@ -365,18 +365,19 @@ flowchart TD
 | When does it hit? | similarity >= `CACHE_THRESHOLD` **and** `guard_ok` | Embeddings treat "30 days" and "60 days" as near-identical |
 | What is stored? | Answerable, at least one citation, all citations valid | Never cache refusals, errors, Deep mode, image requests |
 | What is the scope? | `namespace` and `mode` must match | Corpus, answer model, prompt version or retrieval settings changed means stale |
+| A request with a document filter? | Bypasses read and write | A stored answer may cite documents outside the filter, and an answer from a filter is not a general one |
 | When does it expire? | TTL 7 days; LRU eviction above 10,000 entries | Bounded memory and staleness |
 | Corpus change? | `invalidate_except(new_namespace)` drops everything older, immediately | A new document can change *any* answer, so partial invalidation is unsafe (ADR-7) |
 | What does a hit cost? | Local embedding (and one LLM request if the question needed condensing) | Log `saved_requests` and `saved_usd` (shadow) as stored minus this request's; on the free tier saved requests is the headline number |
 
-**Why NumPy and SQLite instead of Redis or GPTCache** (the roadmap names those): zero infrastructure, every step visible for learning and interviews, exact threshold analysis, and plenty for tens of thousands of entries. The `CacheBackend` interface (`cache/base.py`: `lookup`, `insert`, `invalidate_except`, `clear`, `stats`) lets a Redis or vector-DB backend replace it later (ADR-2). `SemanticCache` has no `stats()`, so M6 wraps it in a small adapter and leaves the reference code unchanged. Limits: a linear scan, so roughly 100k entries is the ceiling (`100,000 x 384 x 4 bytes` is about 150 MB).
+**Why NumPy and SQLite instead of Redis or GPTCache** (the roadmap names those): zero infrastructure, every step visible for learning and interviews, exact threshold analysis, and plenty for tens of thousands of entries. The `CacheBackend` interface (`cache/base.py`: `lookup`, `insert`, `invalidate_except`, `clear`, `stats`) lets a Redis or vector-DB backend replace it later (ADR-2). `SemanticCache` has no `stats()`, so `cache/store.py` subclasses it as `PersistentCache` and leaves the reference code unchanged. The subclass adds `stats()`, `best_similarity()` (logged on misses for chart 6) and failure handling: a corrupt file, a row removed by another process, or a vector of another width each count as a miss. The API also calls `invalidate_except` at start-up, because `citerag ingest` runs with the API stopped. Limits: a linear scan, so roughly 100k entries is the ceiling (`100,000 x 384 x 4 bytes` is about 150 MB).
 
 **Threshold workflow (M6).**
-1. Build `eval/cache_pairs.jsonl`: at least 30 equivalent pairs (paraphrases) and at least 30 near-misses (changed number, entity, unit, negation, scope). Candidate pairs can come from an LLM, but a human labels them.
-2. `citerag eval cache-sweep` embeds both sides, computes cosine per pair, calls `threshold_sweep` and `pick_threshold` (Appendix A), saves a chart of precision, recall and false-hit rate against threshold, and prints the recommended value for `CACHE_THRESHOLD`. It never edits config itself.
+1. Build `eval/cache_pairs.jsonl`: at least 30 equivalent pairs (paraphrases) and at least 30 near-misses (changed number, entity, unit, negation, scope). Unlabelled candidates are in `eval/cache_pairs.candidates.jsonl`; `scripts/review_cache_pairs.py --label` writes only what a human types. The sweep ignores pairs with `labelled: false` and refuses to run with none.
+2. `citerag eval cache-sweep` embeds both sides, computes cosine per pair, applies `guard_ok` the way the cache does, calls `threshold_sweep` and `pick_threshold` (Appendix A), saves a chart of precision, recall and false-hit rate against threshold, and prints the recommended value for `CACHE_THRESHOLD`. It never edits config itself.
 3. If `pick_threshold` returns `None`, no threshold is both safe and useful: improve the guard or the embedding before shipping the cache.
 
-**Benchmark (M6).** `citerag eval bench-cache --workload eval/workload.jsonl` replays about 100 questions (golden questions plus human-reviewed paraphrases, with deliberate repeats so at least 40% are paraphrases of an earlier question) twice, cache off then on, each from a clean log. Report hit rate, p50 / p95 latency, LLM requests, tokens, shadow dollars, **and answer correctness** (judge against gold answers) for both runs. Save `docs/results/E6_cache_benchmark.md` plus charts. Request budget: about 100 to 150 requests for the cache-off run plus judging (section 13); the replay is resumable (`--resume`) so it can be spread over several free-tier days, and it never uses the eval disk cache (that would hide the thing being measured).
+**Benchmark (M6).** `scripts/make_workload.py` builds `eval/workload.jsonl` from the golden questions plus the paraphrases a human labelled equivalent, so at least 40% are paraphrases of an earlier question. `citerag eval bench-cache --workload eval/workload.jsonl` replays it twice, cache off then on, with its own empty cache in the run folder. A hit reuses the verdict of the answer it served when the gold answer is the same; a hit with another gold answer is judged, so a false hit cannot hide. Report hit rate, p50 / p95 latency, LLM requests, tokens, shadow dollars, **and answer correctness** (judge against gold answers) for both runs. Save `docs/results/E6_cache_benchmark.md` plus charts. Request budget: about 100 to 150 requests for the cache-off run plus judging (section 13); the replay is resumable (`--resume`) so it can be spread over several free-tier days, and it never uses the eval disk cache (that would hide the thing being measured).
 
 **Failure modes**
 
@@ -592,8 +593,8 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 | `citerag eval compare RUN_A RUN_B` | Delta table |
 | `citerag eval parts [--golden F] [--index-dir D] [--k N]` | For each `multi_chunk` item, the hybrid rank of each gold part and which parts are missed at k; zero LLM requests |
 | `citerag eval gate RUN_ID` | What each `MIN_TOP_SIMILARITY` would do to a run's cosines; prints a proposal and changes nothing |
-| `citerag eval cache-sweep --pairs eval/cache_pairs.jsonl` | Threshold analysis |
-| `citerag eval bench-cache --workload eval/workload.jsonl` | Cache on/off replay |
+| `citerag eval cache-sweep [--pairs F] [--max-false-hit-rate X] [--chart F]` | Threshold analysis on labelled pairs; prints a recommendation and changes nothing; zero LLM requests |
+| `citerag eval bench-cache [--workload F] [--index-dir D] [--max-requests N] [--resume RUN_ID] [--skip-judge] [--estimate] [--report F]` | Cache on/off replay; `--estimate` prints the request cost and stops |
 | `citerag eval gen-candidates --n 60` | CrewAI question generation |
 | `citerag eval analyze-failures RUN_ID` | CrewAI failure analysis |
 
@@ -611,10 +612,11 @@ Base path `/v1`, JSON, optional header `X-API-Key` (required only if `CITERAG_AP
 | `POST /v1/chat/stream` [SHOULD] | `ChatRequest` | SSE | Events below |
 | `GET /v1/sessions/{id}/messages` | | `list[Message]` | |
 | `DELETE /v1/sessions/{id}` | | 204 | |
-| `GET /v1/cache/stats` / `POST /v1/cache/clear` | | stats / 204 | |
+| `GET /v1/cache/stats` / `POST /v1/cache/clear` | | stats plus threshold / 204 | |
 | `GET /v1/logs/requests?since=&limit=` | | rows for the dashboard | |
 | `GET /v1/logs/llm_calls?since=&limit=` | | rows for the dashboard | |
 | `GET /v1/eval/runs` / `GET /v1/eval/runs/{run_id}` | | run summaries / items | Reads `eval/results/` |
+| `GET /v1/eval/cache-sweep` | | the last saved sweep, or null | For chart 7 |
 | `POST /v1/transcribe` [COULD] | audio | `{"text": ...}` | |
 
 **SSE events** (`/v1/chat/stream`): `event: status` with `{"stage": "condensing" | "cache" | "retrieving" | "reranking" | "generating" | "verifying"}`, then exactly one `event: result` with a `ChatResponse` or `event: error` with an `ErrorResponse`. Implement with FastAPI `StreamingResponse(media_type="text/event-stream")`. Answers are not streamed token by token (ADR-8).
@@ -640,9 +642,9 @@ Structure: `ui/app.py` (entry and sidebar), `ui/pages/1_Chat.py`, `2_Library.py`
 |---|---|---|---|---|
 | 1 | Cache hit rate over time | `requests` | `cache_hit.rolling(20).mean()` | line |
 | 2 | Latency, hit vs miss | `requests.lat_total` | `groupby(cache_hit)`, `np.percentile` p50 / p95 | box plot, log y |
-| 3 | Cumulative LLM requests, actual vs "without cache" | `requests` | `llm_requests.cumsum()`, plus `saved_requests.cumsum()` (shadow dollars as a second axis) | two lines |
-| 4 | Tokens and requests by call type | `llm_calls` | `groupby(role).agg(tokens=..., requests="count")` | stacked bar |
-| 5 | Latency by stage (misses) | `requests.lat_*` | `mean` per column | stacked bar |
+| 3 | Cumulative LLM requests, actual vs "without cache" | `requests` | `llm_requests.cumsum()`, plus `saved_requests.cumsum()` | two lines on one axis (shadow dollars read 0, and two scales mislead) |
+| 4 | Tokens and requests by call type | `llm_calls` | `groupby(role).agg(tokens=..., requests="count")` | two panels of bars, one scale each |
+| 5 | Latency by stage (misses) | `requests.lat_*` | `mean` per column | labelled bars |
 | 6 | Similarity of hits vs best similarity of misses | `requests.cache_similarity` | `histogram` | overlaid histograms with threshold line |
 | 7 | Threshold sweep | `threshold_sweep` frame | none (precomputed) | three lines, chosen threshold marked |
 | 8 | Metrics, run A vs B | `summary.json` | `DataFrame.T` | grouped bar |
