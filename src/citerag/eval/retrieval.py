@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from citerag.eval.metrics import hit_at_k, is_hit, reciprocal_rank
 from citerag.rag.context import Chunk
-from citerag.schemas import GoldenItem
+from citerag.schemas import GoldenItem, GoldenSource
 
 SCORED_TYPES = {"answerable", "multi_chunk", "image"}
 
@@ -38,6 +38,20 @@ class RetrievalReport(BaseModel):
 
 def _label(chunk: Chunk) -> str:
     return chunk.doc_name if chunk.page is None else f"{chunk.doc_name} p{chunk.page}"
+
+
+def first_gold_rank(chunks: list[Chunk], gold: list[GoldenSource]) -> int | None:
+    """Rank of the first chunk on a gold page, counting from 1. None when the list has no gold chunk."""
+    for rank, c in enumerate(chunks, start=1):
+        if is_hit(c.doc_name, c.page, gold):
+            return rank
+    return None
+
+
+def rank_line(name: str, chunks: list[Chunk], gold: list[GoldenSource], show: int = 3) -> str:
+    rank = first_gold_rank(chunks, gold)
+    found = f"not found in {len(chunks)}" if rank is None else f"rank {rank} of {len(chunks)}"
+    return f"{name}: {found}, top: {[_label(c) for c in chunks[:show]]}"
 
 
 def score_retrieval(

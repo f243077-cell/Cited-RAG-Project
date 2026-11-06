@@ -69,6 +69,15 @@ def _print_report(title: str, report: RetrievalReport) -> None:
     typer.echo(f"  MRR@{report.mrr_k}: {report.mrr:.3f}")
 
 
+def _check_index(target: Path, settings: Settings) -> None:
+    from citerag.ingest.manifest import check_manifest, load_manifest
+
+    manifest = load_manifest(target)
+    if manifest is None or not manifest.docs:
+        raise ValidationFailedError(f"no index at {target}: ingest documents first")
+    check_manifest(manifest, settings)
+
+
 @eval_app.command("retrieval")
 def eval_retrieval(
     golden: Annotated[Path, typer.Option(help="JSONL of golden items")] = Path(
@@ -84,17 +93,13 @@ def eval_retrieval(
     from citerag.eval.retrieval import score_retrieval
     from citerag.index.retriever import HybridRetriever
     from citerag.index.store import open_store
-    from citerag.ingest.manifest import check_manifest, load_manifest
 
     settings = get_settings()
     target = index_dir or settings.index_dir
     try:
         items = load_golden(golden, require_verified=require_verified)
         items = [item for item in items if item.type not in (skip_type or [])]
-        manifest = load_manifest(target)
-        if manifest is None or not manifest.docs:
-            raise ValidationFailedError(f"no index at {target}: ingest documents first")
-        check_manifest(manifest, settings)
+        _check_index(target, settings)
     except CiteRAGError as exc:
         typer.echo(f"{exc.code}: {exc.message}")
         raise typer.Exit(1) from exc
@@ -138,6 +143,61 @@ def eval_retrieval(
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     typer.echo(f"Saved {run_dir / 'summary.json'}")
+
+
+@eval_app.command("explain")
+def eval_explain(
+    item_id: Annotated[str, typer.Argument(help="Golden item id, e.g. a-017")],
+    golden: Annotated[Path, typer.Option(help="JSONL of golden items")] = Path(
+        "eval/golden/candidates.jsonl"
+    ),
+    index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
+) -> None:
+    """One item: first gold rank per retriever, plus the stored text of its gold pages. Zero LLM requests.
+
+    Vector and BM25 rank the whole index. Hybrid is the real fused list, cut to TOP_K_RETRIEVE.
+    """
+    from citerag.eval.golden import load_golden
+    from citerag.eval.metrics import is_hit
+    from citerag.eval.retrieval import rank_line
+    from citerag.index.retriever import HybridRetriever
+    from citerag.index.store import open_store
+
+    settings = get_settings()
+    target = index_dir or settings.index_dir
+    try:
+        item = next((i for i in load_golden(golden) if i.id == item_id), None)
+        if item is None:
+            raise ValidationFailedError(f"{item_id} is not in {golden}")
+        _check_index(target, settings)
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+
+    store = open_store(settings, target)
+    try:
+        retriever = HybridRetriever(store, settings)
+        rankings = {
+            "vector": retriever.vector_ranking(item.question),
+            "bm25": retriever.bm25_ranking(item.question),
+            "hybrid": retriever.candidates(item.question),
+        }
+        stored = retriever.all_chunks()
+    finally:
+        store.close()
+
+    typer.echo(f"{item.id} ({item.type}): {item.question}")
+    typer.echo(f"gold answer: {item.gold_answer}")
+    typer.echo(f"gold sources: {[g.model_dump() for g in item.gold_sources] or 'no gold sources'}")
+    for name, ranking in rankings.items():
+        typer.echo(rank_line(name, ranking, item.gold_sources))
+    positions = {
+        name: {c.chunk_id: rank for rank, c in enumerate(ranking, start=1)}
+        for name, ranking in rankings.items()
+    }
+    for chunk in (c for c in stored if is_hit(c.doc_name, c.page, item.gold_sources)):
+        ranks = ", ".join(f"{name} {found.get(chunk.chunk_id, '-')}" for name, found in positions.items())
+        typer.echo(f"\n--- {chunk.doc_name} p{chunk.page} {chunk.chunk_id[-4:]} ({ranks}) ---\n{chunk.text}")
 
 
 def _retrieval_config(settings: Settings) -> dict:

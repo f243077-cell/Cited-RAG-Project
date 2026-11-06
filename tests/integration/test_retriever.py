@@ -106,6 +106,35 @@ def test_refresh_picks_up_new_and_replaced_documents_for_bm25(world):
     assert all("Quokkas" not in c.text for c in retriever.candidates("quokkas"))
 
 
+def test_vector_ranking_reaches_past_top_k_retrieve(world):
+    settings, store, _ = world
+    retriever = _retriever(settings.model_copy(update={"top_k_retrieve": 1}), store)
+    assert len(retriever.candidates("warranty")) == 1
+    assert len(retriever.vector_ranking("warranty")) == store.docstore_count()
+
+
+def test_bm25_ranking_keeps_only_keyword_matches(world):
+    settings, store, _ = world
+    ranked = _retriever(settings, store).bm25_ranking("zebrafish")
+    assert [c.doc_name for c in ranked] == ["fish.txt"] and ranked[0].score > 0.0
+
+
+def test_rankings_are_empty_on_an_empty_index(settings):
+    store = IndexStore(settings.index_dir, HashEmbedding())
+    retriever = _retriever(settings, store)
+    assert retriever.vector_ranking("x") == [] and retriever.bm25_ranking("x") == []
+    assert retriever.all_chunks() == []
+    store.close()
+
+
+def test_all_chunks_returns_the_stored_text_in_document_order(world):
+    settings, store, ids = world
+    chunks = _retriever(settings, store).all_chunks()
+    pages = [c.page for c in chunks if c.doc_id == ids["policy"]]
+    assert len(chunks) == store.docstore_count() and pages == [1, 2]
+    assert any("Zebrafish" in c.text for c in chunks)
+
+
 def test_gate_uses_true_cosine(world):
     settings, store, ids = world
     retriever = _retriever(settings, store)

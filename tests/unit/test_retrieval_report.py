@@ -1,6 +1,6 @@
 import pytest
 
-from citerag.eval.retrieval import score_retrieval
+from citerag.eval.retrieval import first_gold_rank, score_retrieval
 from citerag.rag.context import Chunk
 from citerag.schemas import GoldenItem, GoldenSource
 
@@ -54,6 +54,13 @@ def test_gate_cosines_are_reported_for_every_item_type():
     report = _score()
     assert report.answerable_cosines == [0.9, 0.8, 0.5]
     assert report.unanswerable_cosines == [0.4]
+
+
+def test_first_gold_rank_counts_from_one():
+    gold = [GoldenSource(doc="a.pdf", page=2)]
+    assert first_gold_rank(RANKED["third"], gold) == 3
+    assert first_gold_rank(RANKED["miss"], gold) is None
+    assert first_gold_rank([], gold) is None
 
 
 def test_empty_scored_set_does_not_divide_by_zero():

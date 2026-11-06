@@ -122,6 +122,27 @@ class HybridRetriever:
                 logger.warning("rerank failed; continuing with the fused order", exc_info=True)
         return [_to_chunk(n) for n in nodes[:limit]]
 
+    def vector_ranking(self, query: str) -> list[Chunk]:
+        """Diagnostic: every chunk by vector similarity. The answer path cuts this to TOP_K_RETRIEVE."""
+        size = self._store.docstore_count()
+        return [_to_chunk(n) for n in self._store.vector_retriever(size).retrieve(query)] if size else []
+
+    def bm25_ranking(self, query: str) -> list[Chunk]:
+        """Diagnostic: every keyword match by BM25. The answer path cuts this to TOP_K_RETRIEVE."""
+        size = self._store.docstore_count()
+        if size == 0:
+            return []
+        bm25 = BM25Retriever.from_defaults(docstore=self._store.docstore, similarity_top_k=size)
+        return [_to_chunk(n) for n in _MatchingBM25(bm25).retrieve(query)]
+
+    def all_chunks(self) -> list[Chunk]:
+        """Diagnostic: the stored text, in document order."""
+        nodes = self._store.docstore.docs.values()
+        return sorted(
+            (_to_chunk(NodeWithScore(node=n)) for n in nodes),
+            key=lambda c: (c.doc_name, c.page or 0, c.chunk_id),
+        )
+
     def embed_query(self, query: str) -> list[float]:
         return self._store.embed_query(query)
 

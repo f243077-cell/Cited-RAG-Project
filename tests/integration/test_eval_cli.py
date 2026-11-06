@@ -28,7 +28,9 @@ def run(settings, monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     monkeypatch.setattr(store_module, "make_embedder", lambda _: HashEmbedding())
     monkeypatch.chdir(tmp_path)
-    return lambda *args: CliRunner().invoke(cli.app, ["eval", "retrieval", "--golden", str(golden), *args])
+    return lambda *args, command="retrieval": CliRunner().invoke(
+        cli.app, ["eval", command, "--golden", str(golden), *args]
+    )
 
 
 def test_report_prints_counts_and_saves_a_run(run, tmp_path):
@@ -50,6 +52,27 @@ def test_skip_type_leaves_items_out(run):
 def test_require_verified_stops_a_draft_set(run):
     result = run("--require-verified")
     assert result.exit_code == 1 and "validation_error" in result.output
+
+
+def test_explain_prints_each_rank_and_the_gold_text(run, tmp_path):
+    result = run("a-1", command="explain")
+    assert result.exit_code == 0, result.output
+    for line in ("vector: rank 1 of 1", "bm25: rank 1 of 1", "hybrid: rank 1 of 1"):
+        assert line in result.output
+    assert "(vector 1, bm25 1, hybrid 1)" in result.output
+    assert "Warranty covers manufacturing defects." in result.output
+    assert not (tmp_path / "eval" / "results").exists()
+
+
+def test_explain_marks_a_ranking_that_never_finds_gold(run):
+    result = run("u-1", command="explain")
+    assert result.exit_code == 0, result.output
+    assert "bm25: not found" in result.output and "no gold sources" in result.output
+
+
+def test_explain_refuses_an_unknown_item(run):
+    result = run("a-9", command="explain")
+    assert result.exit_code == 1 and "a-9" in result.output
 
 
 def test_empty_index_stops_with_a_clear_message(run, settings, monkeypatch, tmp_path):
