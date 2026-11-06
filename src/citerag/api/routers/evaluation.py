@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from citerag.api.deps import require_api_key
+from citerag.eval.cache_tools import SweepResult, load_sweep
 from citerag.eval.report import list_runs, load_detail
 from citerag.schemas import RunDetail, RunSummary
 
@@ -14,6 +15,12 @@ router = APIRouter(prefix="/v1/eval", dependencies=[Depends(require_api_key)])
 @router.get("/runs")
 def runs() -> list[RunSummary]:
     return list_runs()
+
+
+@router.get("/cache-sweep")
+def cache_sweep() -> SweepResult | None:
+    """The last saved sweep for the dashboard, or null when none has run."""
+    return load_sweep()
 
 
 @router.get("/runs/{run_id}")
