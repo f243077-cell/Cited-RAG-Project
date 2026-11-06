@@ -6,6 +6,9 @@
 Reads the source files, so it needs no index and makes no LLM request. It changes no item: moving one to
 golden.jsonl with verified: true stays with the human reviewer. A marked sentence is only the best guess, chosen by
 how many answer words it shares. A low count means the page may not state the answer, so read that page closely.
+
+Sentence matching compares terms by their first 5 characters, so 800-61r2 and 800-61r3 look identical there, and a
+marked sentence can name the wrong revision. The term list for unanswerable items matches identifiers whole.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ SENTENCE_END = re.compile(r"(?<=[.!?;:])\s+(?=[A-Z0-9(\[•])|\s+(?=•)")
 STEM = 5  # catches categories/category and manage/managing without a stemmer
 CONTEXT_SENTENCES = 2  # whole-document gold has no page, so show this much around the match
 MAX_MB = 100
+COMMON_SHARE = 0.10  # a term on more than this share of all pages says nothing about the question
+COMMON_MIN_PAGES = 5  # a small corpus must not call a term common for sitting on two pages
 Pages = dict[int | None, str]
 
 
@@ -102,6 +107,70 @@ def _found_line(match: Match | None, noun: str) -> str:
     return f"Best match{where}: shares {match.found} of {match.wanted} {noun} terms."
 
 
+def _word_pattern(word: str) -> re.Pattern[str]:
+    """Loose on purpose: a stray page costs a glance, but a false "not found" hides an answer from the reviewer."""
+    if not word.isalpha():  # identifiers match whole: 800-61 must not match 800-61r3
+        return re.compile(rf"(?<![a-z0-9.-]){re.escape(word)}(?![.-]?[a-z0-9])")
+    singular = re.sub(r"ies$", "y", word)
+    singular = singular[:-1] if singular.endswith("s") and not singular.endswith("ss") else singular
+    if len(singular) <= 4:
+        return re.compile(rf"(?<![a-z0-9]){re.escape(singular)}(?:s|es|d|ed|ing)?(?![a-z0-9])")
+    return re.compile(rf"(?<![a-z0-9]){re.escape(singular[: max(4, len(singular) - 3)])}[a-z]*")
+
+
+def _pages_with(word: str, flat: dict[tuple[str, int | None], str]) -> list[tuple[str, int | None]]:
+    rx = _word_pattern(word)
+    return [where for where, text in flat.items() if rx.search(text)]
+
+
+def _show_pages(found: list[tuple[str, int | None]]) -> str:
+    by_doc: dict[str, list[str]] = {}
+    for doc, page in found:
+        by_doc.setdefault(doc, [])
+        if page is not None:
+            by_doc[doc].append(f"p{page}")
+    return "; ".join(f"{doc} {', '.join(pages)}".strip() for doc, pages in by_doc.items())
+
+
+def term_lines(question: str, docs: dict[str, Pages]) -> list[str]:
+    """Where each distinctive question word sits, so a reviewer can see what the corpus never mentions."""
+    words = dict.fromkeys(
+        w for w in TOKEN.findall(question.lower()) if w not in STOPWORDS and (len(w) > 1 or w.isdigit())
+    )
+    flat = {
+        (doc, page): re.sub(r"\s+", " ", text.replace("-\n", "")).lower()
+        for doc, pages in docs.items()
+        for page, text in pages.items()
+    }
+    limit = max(COMMON_MIN_PAGES, COMMON_SHARE * len(flat))
+    distinctive, common = [], []
+    for word in words:
+        found = _pages_with(word, flat)
+        if len(found) > limit:
+            common.append(word)
+        else:
+            distinctive.append(f"  {word}: {_show_pages(found) or 'not found in the corpus'}")
+    lines = (
+        ["Distinctive question terms:", *distinctive] if distinctive else ["Distinctive question terms: none"]
+    )
+    return [*lines, f"Left out as common in the corpus: {', '.join(common)}"] if common else lines
+
+
+def _closest_text(docs: dict[str, Pages], terms: set[str], noun: str) -> list[str]:
+    matches = [(name, _best_in(pages, terms)) for name, pages in docs.items() if pages]
+    usable = [(name, match) for name, match in matches if match is not None]
+    if not usable:
+        return ["No text in the corpus to compare."]
+    name, match = max(usable, key=lambda pair: pair[1].found)
+    if match.found == 0:
+        return ["No text in the corpus shares a question term."]
+    return [
+        f"Closest text in the corpus, from {name}: confirm it does NOT answer the question.",
+        _found_line(match, noun),
+        _around(docs[name], match),
+    ]
+
+
 def render_source(source: GoldenSource, docs: dict[str, Pages], terms: set[str], noun: str) -> list[str]:
     part = f", part {source.part}"
     pages = docs.get(source.doc)
@@ -139,10 +208,8 @@ def render_item(item: GoldenItem, docs: dict[str, Pages]) -> str:
     for source in item.gold_sources:
         lines.extend(render_source(source, docs, terms, noun))
     if item.type == "unanswerable":
-        matches = [(name, _best_in(pages, terms)) for name, pages in docs.items() if pages]
-        name, match = max(((n, m) for n, m in matches if m), key=lambda pair: pair[1].found)
-        lines.append(f"Closest text in the corpus, from {name}: confirm it does NOT answer the question.")
-        lines.extend([_found_line(match, noun), _around(docs[name], match)])
+        lines.extend(_closest_text(docs, terms, noun))
+        lines.extend(term_lines(item.question, docs))
     return "\n".join(lines)
 
 
