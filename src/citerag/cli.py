@@ -303,6 +303,50 @@ def eval_gate(run_id: str) -> None:
         )
 
 
+@eval_app.command("parts")
+def eval_parts(
+    golden: Annotated[Path, typer.Option(help="JSONL of golden items")] = Path(
+        "eval/golden/candidates.jsonl"
+    ),
+    index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
+    k: Annotated[int, typer.Option(help="A part is missed when it is not in the top k")] = 5,
+) -> None:
+    """For each multi_chunk item: the hybrid rank of each gold part. Uses zero LLM requests."""
+    from citerag.eval.golden import load_golden
+    from citerag.eval.retrieval import part_ranks
+    from citerag.index.retriever import HybridRetriever
+    from citerag.index.store import open_store
+
+    settings = get_settings()
+    target = index_dir or settings.index_dir
+    try:
+        items = [item for item in load_golden(golden) if item.type == "multi_chunk"]
+        _check_index(target, settings)
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+
+    store = open_store(settings, target)
+    try:
+        retriever = HybridRetriever(store, settings)
+        found = [(item, retriever.candidates(item.question)) for item in items]
+    finally:
+        store.close()
+
+    full = 0
+    for item, chunks in found:
+        rows = part_ranks(chunks, item.gold_sources, k)
+        missed = [row.part for row in rows if row.missed]
+        full += not missed
+        typer.echo(f"\n{item.id}: {item.question}")
+        for row in rows:
+            rank = f"rank {row.first_rank}" if row.first_rank else f"not in the top {settings.top_k_retrieve}"
+            state = "MISSED" if row.missed else "ok"
+            typer.echo(f"  part {row.part} ({state}, {rank}): {', '.join(row.sources)}")
+        typer.echo(f"  missed at k={k}: {missed or 'none'}")
+    typer.echo(f"\nfull_coverage@{k}: {full}/{len(found)}")
+
+
 @eval_app.command("explain")
 def eval_explain(
     item_id: Annotated[str, typer.Argument(help="Golden item id, e.g. a-017")],

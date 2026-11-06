@@ -188,3 +188,23 @@ def test_evaluation_page_compares_two_runs(monkeypatch, tmp_path):
     app.selectbox[1].select("r1").run()
     assert not app.exception
     assert any("under 3 points" in c.value for c in app.caption)
+
+
+def test_parts_command_prints_each_part_and_what_was_missed(settings, monkeypatch, tmp_path):
+    store = IndexStore(settings.index_dir, HashEmbedding())
+    Ingestor(settings, store, settings.index_dir).ingest_bytes("warranty.md", b"Warranty covers defects.")
+    store.close()
+    item = {
+        "id": "m-1",
+        "question": "warranty defects",
+        "type": "multi_chunk",
+        "gold_sources": [{"doc": "warranty.md", "part": 0}, {"doc": "gone.md", "part": 1}],
+    }
+    golden = tmp_path / "golden.jsonl"
+    golden.write_text(json.dumps(item), encoding="utf-8")
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(store_module, "make_embedder", lambda _: HashEmbedding())
+    result = CliRunner().invoke(cli.app, ["eval", "parts", "--golden", str(golden)])
+    assert result.exit_code == 0, result.output
+    assert "part 0 (ok, rank 1)" in result.output and "part 1 (MISSED, not in the top 20)" in result.output
+    assert "missed at k=5: [1]" in result.output and "full_coverage@5: 0/1" in result.output

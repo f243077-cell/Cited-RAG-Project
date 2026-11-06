@@ -24,6 +24,13 @@ class ItemResult(BaseModel):
     top_sources: list[str]
 
 
+class PartRank(BaseModel):
+    part: int
+    sources: list[str]
+    first_rank: int | None  # rank of the first chunk of this part; None when it is not in the list
+    missed: bool  # not in the top k
+
+
 class RetrievalReport(BaseModel):
     n_items: int
     n_scored: int
@@ -49,6 +56,17 @@ def first_gold_rank(chunks: list[Chunk], gold: list[GoldenSource]) -> int | None
         if is_hit(c.doc_name, c.page, gold):
             return rank
     return None
+
+
+def part_ranks(chunks: list[Chunk], gold: list[GoldenSource], k: int) -> list[PartRank]:
+    """Sources with the same part are alternatives, so a part ranks where its earliest source appears."""
+    rows = []
+    for part in sorted({g.part for g in gold}):
+        sources = [g for g in gold if g.part == part]
+        rank = first_gold_rank(chunks, sources)
+        labels = [g.doc if g.page is None else f"{g.doc} p{g.page}" for g in sources]
+        rows.append(PartRank(part=part, sources=labels, first_rank=rank, missed=rank is None or rank > k))
+    return rows
 
 
 def rank_line(name: str, chunks: list[Chunk], gold: list[GoldenSource], show: int = 3) -> str:

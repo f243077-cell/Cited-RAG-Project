@@ -1,6 +1,6 @@
 import pytest
 
-from citerag.eval.retrieval import first_gold_rank, score_retrieval
+from citerag.eval.retrieval import first_gold_rank, part_ranks, score_retrieval
 from citerag.rag.context import Chunk
 from citerag.schemas import GoldenItem, GoldenSource
 
@@ -66,3 +66,20 @@ def test_first_gold_rank_counts_from_one():
 def test_empty_scored_set_does_not_divide_by_zero():
     report = score_retrieval([item("none", kind="unanswerable")], RANKED.__getitem__, COSINES.__getitem__)
     assert report.n_scored == 0 and report.mrr == 0.0 and report.hit_rate[1] == 0.0
+
+
+def _on(doc, page):
+    return Chunk(chunk_id="c", doc_id="d", doc_name=doc, page=page, text="t")
+
+
+def test_part_ranks_use_the_earliest_alternative_and_flag_a_late_part():
+    gold = [
+        GoldenSource(doc="a.pdf", page=5, part=0),
+        GoldenSource(doc="a.pdf", page=25, part=0),
+        GoldenSource(doc="b.pdf", page=8, part=1),
+        GoldenSource(doc="c.pdf", page=1, part=2),
+    ]
+    chunks = [_on("x.pdf", 1), _on("a.pdf", 25), _on("x.pdf", 2), _on("b.pdf", 8)]
+    rows = part_ranks(chunks, gold, k=3)
+    assert [(r.part, r.first_rank, r.missed) for r in rows] == [(0, 2, False), (1, 4, True), (2, None, True)]
+    assert rows[0].sources == ["a.pdf p5", "a.pdf p25"]
