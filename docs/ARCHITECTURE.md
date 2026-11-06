@@ -143,7 +143,7 @@ citerag/
 │  ├─ cache/             base.py   semantic_cache.py*   namespace.py*
 │  ├─ multimodal/        vision.py   audio.py
 │  ├─ agents/            schemas.py*   deep_mode.py   eval_crews.py
-│  ├─ eval/              golden.py   metrics.py*   judge.py   ragas_runner.py   runner.py   report.py   cache_tools.py
+│  ├─ eval/              golden.py   metrics.py*   retrieval.py   judge.py   ragas_runner.py   runner.py   report.py   cache_tools.py
 │  ├─ analytics/         logs.py   plots.py
 │  ├─ api/               main.py   deps.py   routers/{chat,documents,cache,logs,eval,health}.py
 │  └─ ui/                app.py   api_client.py   pages/{1_Chat,2_Library,3_Dashboard,4_Evaluation}.py
@@ -296,7 +296,7 @@ async def answer_question(req: ChatRequest, d: Deps) -> ChatResponse:
 
 1. Embed the standalone question once with the local model; reuse it for the cache and the gate.
 2. Vector retriever: `index.as_retriever(similarity_top_k=TOP_K_RETRIEVE, filters=...)`. For `doc_ids` use `MetadataFilter(key="doc_id", value=[...], operator=FilterOperator.IN)` (verified against Chroma, needs the SOURCE relationship from section 6; several equality filters with `FilterCondition.OR` also work).
-3. BM25: `BM25Retriever.from_defaults(docstore=..., similarity_top_k=TOP_K_RETRIEVE)`, rebuilt at start-up and after each ingest. It has no metadata filter, so post-filter its results by `doc_id` and fetch `2 x TOP_K_RETRIEVE` when a filter is active.
+3. BM25: `BM25Retriever.from_defaults(docstore=..., similarity_top_k=TOP_K_RETRIEVE)`, rebuilt at start-up and after each ingest. It has no metadata filter, so post-filter its results by `doc_id` and fetch `2 x TOP_K_RETRIEVE` when a filter is active. Drop score-0 results before fusion: BM25 pads its list with chunks that match no query term, and RRF would reward those ranks (found in M2).
 4. Fusion: `QueryFusionRetriever([vector, bm25], similarity_top_k=TOP_K_RETRIEVE, num_queries=1, mode="reciprocal_rerank", use_async=False)`. `num_queries` above 1 makes LlamaIndex call an LLM to write extra queries, so keep it at 1.
 5. Optional rerank [SHOULD]: `SentenceTransformerRerank(model=RERANK_MODEL, top_n=TOP_K_CONTEXT)` (verified: 35 to 54 ms for 5 passages on CPU). Without rerank, cut the fused list to `TOP_K_CONTEXT`. On any rerank exception, log and continue without it.
 6. **Relevance gate uses true cosine, not the LlamaIndex score.** LlamaIndex's Chroma store reports `score = exp(-distance)`, not cosine similarity (verified: cosine 0.2857 came back as 0.4895). RRF scores are rank-based and not comparable to anything. So compute the gate value with a direct Chroma query, `1 - distance` of the top vector hit, using the query embedding from step 1. Add a unit test: an indexed sentence queried with itself gives about 1.0. (If you prefer to avoid the extra query: `cosine = 1 + ln(score)` for LlamaIndex vector hits, but guard it with that same test.)
@@ -576,6 +576,7 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 |---|---|
 | `citerag ingest PATH [--index-dir D] [--via-api]` | Ingest a file or folder |
 | `citerag cache clear` / `cache stats` | Cache admin |
+| `citerag eval retrieval [--golden F] [--rerank] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
 | `citerag eval run --suite golden [--config F] [--offline] [--via-api] [--limit N] [--max-requests N] [--resume RUN_ID] [--llm-disk-cache]` | Score the system; offline = retrieval metrics only, zero LLM requests; runs append to `items.jsonl` item by item so they can resume |
 | `citerag eval compare RUN_A RUN_B` | Delta table |
 | `citerag eval cache-sweep --pairs eval/cache_pairs.jsonl` | Threshold analysis |
@@ -721,6 +722,7 @@ Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.1
 20. **Output tokens include hidden reasoning.** The strong model spent 64 of 78 output tokens on reasoning for a one-line answer, so `max_tokens` headroom matters (`output_token_details.reasoning`).
 21. **CrewAI asks an interactive question on first run** even with telemetry off: "Share this execution trace with CrewAI? [y/N] (20s timeout)". It blocks for 20 seconds. Set `Crew(tracing=False)` or `CREWAI_TRACING_ENABLED=false`.
 22. **`GET /api/v1/key` lagged or undercounted.** After 5 real attempts `free_model_daily_requests.used` read 3 (an upstream 429 was one of the 5). Trust the local `llm_calls` count, which is stricter.
+23. **BM25 pads its list with score-0 chunks.** Rank fusion credits them as if they matched. Filter them out before fusion (section 8).
 
 ## Appendix A. Reference code (tested; copy as-is)
 

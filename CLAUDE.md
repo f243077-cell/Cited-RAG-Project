@@ -37,6 +37,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run uvicorn citerag.api.main:app --reload --port 8000
 uv run streamlit run src/citerag/ui/app.py
 uv run citerag ingest data/sample         # stop the API first (single-writer Chroma) or add --via-api
+uv run citerag eval retrieval --rerank    # hit@k and MRR on eval/golden/candidates.jsonl, zero LLM requests
 uv run python scripts/pick_free_models.py   # list free models by capability and suggest .env lines (M0)
 uv run citerag eval run --suite golden --offline   # retrieval metrics only, zero LLM requests
 uv run citerag eval run --suite golden --max-requests 35 --resume <run_id>   # spread over free-tier days
@@ -121,6 +122,8 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   `:free` suffix) all show price 0. `scripts/pick_free_models.py` filters them.
 - `MIN_TOP_SIMILARITY=0.30` is too low to refuse much: a refund question with no answer in the NIST corpus scored cosine 0.54
   against it. Calibrate at M4 on the unanswerable items; do not change it by hand before then.
+- **BM25 pads its results with score-0 chunks** that match no query term, and rank fusion rewards those ranks. Keep the
+  `_MatchingBM25` wrapper in `index/retriever.py`.
 - `citerag ingest --via-api` does not exist yet: it needs `POST /v1/documents`, which arrives with the Library page in M3.
 - Not yet verified against real OpenRouter: the judge model (upstream 429 on its one call, so `temperature` is untested), real
   rate-limit headers, `data_collection` on the real service.
