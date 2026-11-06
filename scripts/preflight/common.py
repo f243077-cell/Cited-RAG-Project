@@ -45,6 +45,8 @@ def count_request(n: int = 1) -> int:
 def stop_on_quota(exc: BaseException) -> None:
     """429, 402 or a daily-limit error ends all live checks: never retry in a loop."""
     status = getattr(exc, "status_code", None)
+    if isinstance(exc, ValueError) and exc.args and isinstance(exc.args[0], dict):
+        status = exc.args[0].get("code")  # the error can arrive inside an HTTP 200 body
     if status in (402, 429):
         print(f"SKIPPED: quota (HTTP {status}); stop all live checks now")
         raise SystemExit(0)

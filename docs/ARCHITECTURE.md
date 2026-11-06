@@ -67,7 +67,9 @@ No `anthropic` or `litellm` package is installed. The full dependency set was re
 
 **Resolved and installed, but not exercised:** Ragas, faster-whisper.
 
-**Not verified:** real OpenRouter calls (no API key at preflight; the list says which free models claim image input, structured output and tools, but none has been called; real rate-limit headers and behaviour; real token counts; whether `require_parameters` leaves any free endpoint for a given model), Docker build (the daemon was not running), Streamlit page rendering in a browser. Treat the first real run of each as part of its milestone, and record surprises in `CLAUDE.md` section "Gotchas".
+**Verified against real OpenRouter on 2026-11-06** with `nvidia/nemotron-3.5-super-vl:free`: json_schema and tool-calling structured calls, `require_parameters: true`, the optional headers, an image block returning `ImageAnalysis`, CrewAI `LLM(model="openrouter/...")` with `output_pydantic` (`successful_requests=1` for one call), real token usage, and `response_metadata["model_name"]` as the serving model.
+
+**Not verified:** the judge model `xingchen-agi/xing4.0-29b-a4b:free` (its one call returned an upstream 429, so `temperature` is untested on it), real rate-limit headers, `data_collection` sent to the real service, Docker build (the daemon was not running), Streamlit page rendering in a browser. Treat the first real run of each as part of its milestone, and record surprises in `CLAUDE.md` section "Gotchas".
 
 ## 4. System overview
 
@@ -365,7 +367,7 @@ flowchart TD
 | Corpus change? | `invalidate_except(new_namespace)` drops everything older, immediately | A new document can change *any* answer, so partial invalidation is unsafe (ADR-7) |
 | What does a hit cost? | Local embedding (and one LLM request if the question needed condensing) | Log `saved_requests` and `saved_usd` (shadow) as stored minus this request's; on the free tier saved requests is the headline number |
 
-**Why NumPy and SQLite instead of Redis or GPTCache** (the roadmap names those): zero infrastructure, every step visible for learning and interviews, exact threshold analysis, and plenty for tens of thousands of entries. The `CacheBackend` interface (`cache/base.py`: `lookup`, `insert`, `invalidate_except`, `clear`, `stats`) lets a Redis or vector-DB backend replace it later (ADR-2). Limits: a linear scan, so roughly 100k entries is the ceiling (`100,000 x 384 x 4 bytes` is about 150 MB).
+**Why NumPy and SQLite instead of Redis or GPTCache** (the roadmap names those): zero infrastructure, every step visible for learning and interviews, exact threshold analysis, and plenty for tens of thousands of entries. The `CacheBackend` interface (`cache/base.py`: `lookup`, `insert`, `invalidate_except`, `clear`, `stats`) lets a Redis or vector-DB backend replace it later (ADR-2). `SemanticCache` has no `stats()`, so M6 wraps it in a small adapter and leaves the reference code unchanged. Limits: a linear scan, so roughly 100k entries is the ceiling (`100,000 x 384 x 4 bytes` is about 150 MB).
 
 **Threshold workflow (M6).**
 1. Build `eval/cache_pairs.jsonl`: at least 30 equivalent pairs (paraphrases) and at least 30 near-misses (changed number, entity, unit, negation, scope). Candidate pairs can come from an LLM, but a human labels them.
@@ -414,7 +416,7 @@ Reference code: `cache/semantic_cache.py` and `cache/namespace.py` (Appendix A).
 
 The docs grant the higher ceiling from one credit below the threshold (9 today) to absorb fees. `GET /api/v1/key` returns `is_free_tier` and `free_model_daily_requests` (`used`, `limit`, `remaining`); the per-minute limit is not reported there. The unit is the HTTP request, so condense, rewrite, regeneration, each retry, each image caption, each judge call and each CrewAI agent step all count. A negative credit balance can break even free models. Relevant errors: 429 rate limited; 402 insufficient credits (without `Retry-After` it means add credits, not wait); 503 no provider matches your routing needs; 502 model down; and an error can arrive **inside an HTTP 200 body**. Section 13 turns this into a request budget.
 
-**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06 (from the list; none called yet): `nvidia/nemotron-3.5-super-vl:free` for fast, strong and vision, `xingchen-agi/xing4.0-29b-a4b:free` for judge.
+**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06: `nvidia/nemotron-3.5-super-vl:free` for fast, strong and vision (verified live), `xingchen-agi/xing4.0-29b-a4b:free` for judge (not yet verified, upstream 429 on its one call).
 
 | Role | Env var | Used for | Must support |
 |---|---|---|---|
@@ -423,7 +425,7 @@ The docs grant the higher ceiling from one credit below the threshold (9 today) 
 | vision | `MODEL_VISION` | image questions, document image captions | image input and structured output |
 | judge | `MODEL_JUDGE` | evaluation judge | structured output; a **different model** from the answerer if possible (self-preference bias) |
 
-All four may be the same model; the quota is per account, not per model. **Pin one model per role for the whole of an experiment**, and never use the random `openrouter/free` router for experiments: it picks a different model per request and destroys comparability. Record in every `llm_calls` row the model that actually answered (the response carries it; the `ChatOpenAI` metadata key was not checked, so confirm it).
+All four may be the same model; the quota is per account, not per model. **Pin one model per role for the whole of an experiment**, and never use the random `openrouter/free` router for experiments: it picks a different model per request and destroys comparability. Record in every `llm_calls` row the model that actually answered: `raw.response_metadata["model_name"]` (verified live).
 
 `scripts/pick_free_models.py` (F-OPS-7): fetch the public list `GET https://openrouter.ai/api/v1/models`, keep entries whose `pricing.prompt` and `pricing.completion` are both 0 and whose `architecture.output_modalities` is text only, drop `openrouter/*` routers, read `architecture.input_modalities`, `supported_parameters` (`structured_outputs`, `response_format`, `tools`, `temperature`), `reasoning.mandatory` and `expiration_date` (field names checked against a live response on 2026-11-06), print a table sorted by capability, and print suggested `.env` lines. Picks need a `:free` id and no expiration date. Never write `.env` automatically.
 
@@ -462,7 +464,7 @@ class LLMGateway(Protocol):
 
 ## 12. Agents (CrewAI)
 
-CrewAI is **off the hot path**: it serves Deep mode and offline evaluation helpers only. Rules: tasks return Pydantic models (`output_pydantic`), no tools, no delegation, passages are passed through `kickoff(inputs=...)` and never formatted into task text with f-strings (document text can contain braces), telemetry off, time limit and iteration cap on every run.
+CrewAI is **off the hot path**: it serves Deep mode and offline evaluation helpers only. Rules: tasks return Pydantic models (`output_pydantic`), no tools, no delegation, tracing off (`Crew(tracing=False)` or `CREWAI_TRACING_ENABLED=false`), passages are passed through `kickoff(inputs=...)` and never formatted into task text with f-strings (document text can contain braces), telemetry off, time limit and iteration cap on every run.
 
 **Deep mode crew** (F-AGT-1), sequential:
 
@@ -715,6 +717,10 @@ Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.1
 16. **`HuggingFaceEmbedding` adds a bge query prefix by default**, and `query_instruction=""` does not stop it. Pass `" "` (section 7).
 17. **The embedding model is cached by llama_index**, under `platformdirs.user_cache_dir("llama_index")`, not `~/.cache/huggingface`.
 18. **Price 0 does not mean usable chat model.** The list also has `openrouter/free`, `google/lyria-*` (audio output) and `stealth/*` without a `:free` suffix.
+19. **A 429 can arrive inside an HTTP 200 body.** A free model rate-limited upstream raises `ValueError({'message': ..., 'code': 429, 'metadata': {'error_type': 'rate_limit_exceeded'}})`. `classify_error` returns kind `provider_body` with `http_status=429`, so the gateway must check that status before retrying (M3).
+20. **Output tokens include hidden reasoning.** The strong model spent 64 of 78 output tokens on reasoning for a one-line answer, so `max_tokens` headroom matters (`output_token_details.reasoning`).
+21. **CrewAI asks an interactive question on first run** even with telemetry off: "Share this execution trace with CrewAI? [y/N] (20s timeout)". It blocks for 20 seconds. Set `Crew(tracing=False)` or `CREWAI_TRACING_ENABLED=false`.
+22. **`GET /api/v1/key` lagged or undercounted.** After 5 real attempts `free_model_daily_requests.used` read 3 (an upstream 429 was one of the 5). Trust the local `llm_calls` count, which is stricter.
 
 ## Appendix A. Reference code (tested; copy as-is)
 
@@ -833,6 +839,9 @@ class IngestReport(BaseModel):
     images_found: int = 0
     images_captioned: int = 0
     images_skipped: int = 0
+    caption_requests: int = 0  # LLM requests spent on captions (the free-tier quota unit)
+    caption_input_tokens: int = 0
+    caption_output_tokens: int = 0
     caption_cost_usd: float = 0.0
     duration_ms: int = 0
 

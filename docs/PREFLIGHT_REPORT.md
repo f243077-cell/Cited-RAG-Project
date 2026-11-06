@@ -2,9 +2,11 @@
 
 Date: 2026-11-06. Machine: Windows 10 Pro (10.0.19045), Git Bash and PowerShell 5.1, uv 0.12.7, project Python 3.13.13.
 
-**LLM requests used: 0 of 20.** No `OPENROUTER_API_KEY` was available, so every live step is marked "skipped: no key". Public pages and the public model list need no key and use no quota.
+**LLM requests used: 5 of 20.** The first run had no key. Live steps ran later the same day, once the key was added.
 
-**Free-tier status: unknown.** It needs the key. `scripts/preflight/s06_key_status.py` reports it.
+**Free-tier status:** `is_free_tier: true`, daily limit 50, `used` 3 and `remaining` 47 after the live run. The key endpoint is not an LLM request.
+
+**Rule break, recorded:** spike 12 got a 429 and spike 13 still ran, because they were chained in one command and the quota guard missed a 429 inside an HTTP 200 body. That cost one extra request. The guard in `scripts/preflight/common.py` is fixed.
 
 ## Results
 
@@ -14,16 +16,16 @@ Date: 2026-11-06. Machine: Windows 10 Pro (10.0.19045), Git Bash and PowerShell 
 | 1 | Python and uv | PASS | System Python 3.14.6, uv 0.12.7; 3.13.13 also installed | None | None |
 | 2 | `uv sync --extra dev` | PASS after fix | First run failed: `numpy>=2.5` needs Python 3.12, `requires-python` said 3.11. Then 257 packages in 14m30s, at the tested versions. No `anthropic`, `litellm` or `llama-index-llms-*` | `requires-python = ">=3.12"`, `.python-version` = 3.13 (your choice), `uv.lock` added | None |
 | 3 | Tests and ruff | PASS | 36 reference tests pass; `ruff check` and `ruff format --check` clean on the starter kit | No edit needed | None |
-| 4 | `.env` and key | SKIPPED | `.env` was missing | `.env` created from `.env.example` with the model picks. `OPENROUTER_API_KEY` is empty | Add the key |
+| 4 | `.env` and key | PASS | `.env` was missing at first | `.env` created from `.env.example` with the model picks; you added the key | None |
 | 5 | Free-tier limits | PASS | Constants in the live page: 20 per minute, 50 per day, 1,000 per day, threshold 10 credits | Documented: the higher ceiling starts at 9 credits, and `GET /api/v1/key` reports the daily counter. `.env.example` limits unchanged | None |
-| 6 | Key status | SKIPPED: no key | Endpoint found: `GET /api/v1/key`, fields `is_free_tier`, `free_model_daily_requests` | `scripts/preflight/s06_key_status.py` is ready | None |
+| 6 | Key status | PASS | Free tier, limit 50. `used` read 3 after 5 real attempts, cause unknown | Gotcha added | None |
 | 7 | `pick_free_models.py` | PASS | Field names checked on a live response (453 models, 15 at price 0, 12 usable after filtering). 8 unit tests | Script and tests added; ARCHITECTURE section 11 corrected | None |
 | 8 | Model picks | PASS | Picks below. All `.env.example` placeholders still exist with the needed capabilities, so they stay | `.env` filled; `.env.example` comment updated | None |
 | 9 | Shadow pricing | CHANGED | You decided on free models only, with no paid reference | `configs/pricing.yaml` holds a free model at 0, so shadow dollars read 0. `llm/pricing.py` exposes `_reference`. PRD F-OPS-5 and OPEN-4 reworded | None |
-| 10 | Structured call, usage, serving-model key | SKIPPED: no key | | `s10_structured.py` ready, about 2 requests | Run after adding the key |
-| 11 | Image payload | SKIPPED: no key | | `s11_vision.py` ready, 1 request | Run after adding the key |
-| 12 | `temperature` on the judge | SKIPPED: no key | | `s12_temperature.py` ready, 1 request | Run after adding the key |
-| 13 | CrewAI against the real service | SKIPPED: no key | | `s13_crewai.py` ready, up to 3 requests | Run after adding the key |
+| 10 | Structured call, usage, serving-model key | PASS | json_schema and tools both work on the strong model. `require_parameters: true` and the headers accepted. Serving model in `response_metadata["model_name"]`. Usage in `usage_metadata`; 64 of 78 output tokens were reasoning | Docs updated | None |
+| 11 | Image payload | PASS | `ImageAnalysis` returned, red image described correctly. 285 input tokens; `usage_metadata` does not break out image tokens | Docs updated | None |
+| 12 | `temperature` on the judge | SKIPPED: quota | Upstream 429 inside HTTP 200 on `xingchen-agi/xing4.0-29b-a4b:free`. This says nothing about `temperature`, and the judge model is unverified | Gotcha added | Recheck at M4 |
+| 13 | CrewAI against the real service | PASS | `output_pydantic` worked; `successful_requests=1`, 320 tokens. It printed a first-run trace prompt that blocks 20 s, despite telemetry off | Gotcha added; use `Crew(tracing=False)` in M7 | None |
 | 14 | Embeddings | PASS | 384 dimensions, norm 1.000000, identical text cosine 1.000000. Download about 3.5 min, 128 MB | **Doc claim was wrong:** LlamaIndex adds a query prefix (cosine 0.951). Fix documented: `query_instruction=" "` | None |
 | 15 | Chroma and LlamaIndex | PASS after fixes | Cosine space, docstore, reload, BM25, hybrid fusion, `FilterOperator.IN` and OR. `exp(-d)` equals the LlamaIndex score (0.5433 against cosine 0.3899). Self cosine 1.0000 | **Two silent bugs found:** `doc_id` overwritten (filters return nothing) and metadata embedded (self cosine 0.87). Fixes in ARCHITECTURE section 6 | None |
 | 16 | Reranker | PASS | Correct top passage. 35 to 54 ms for 5 passages on CPU; model load and download 102 s, 88 MB | None | None |
@@ -31,12 +33,12 @@ Date: 2026-11-06. Machine: Windows 10 Pro (10.0.19045), Git Bash and PowerShell 
 | 18 | Docker | PARTIAL | Client 29.8.2 installed; daemon not running, so a build could not be judged | None | Start Docker Desktop before M8 |
 | 19 | Sample corpus | PASS | 6 documents, 164 PDF pages (below) | `scripts/fetch_sample.py`, `data/sample/SOURCES.md` (git-ignored) | None |
 
-## Model picks (from the list only; none has been called)
+## Model picks
 
 | Role | Model | Capabilities claimed by the list |
 |---|---|---|
-| fast, strong, vision | `nvidia/nemotron-3.5-super-vl:free` | Image input, `structured_outputs`, `response_format`, tools, temperature; no forced reasoning |
-| judge | `xingchen-agi/xing4.0-29b-a4b:free` | `structured_outputs`, `response_format`, tools, temperature; no forced reasoning |
+| fast, strong, vision (verified live) | `nvidia/nemotron-3.5-super-vl:free` | Image input, `structured_outputs`, `response_format`, tools, temperature; no forced reasoning |
+| judge (not yet verified) | `xingchen-agi/xing4.0-29b-a4b:free` | `structured_outputs`, `response_format`, tools, temperature; no forced reasoning |
 
 `dots-studio/dots-3-note-preview:free` also qualifies but is skipped because it has an expiration date of 2026-12-31.
 
@@ -67,7 +69,7 @@ NIST notes that some works may include third-party material under copyright. The
 
 ## Recommendation on OPEN-5
 
-**Buy credits once if you can.** The request budget is the reason:
+**Decided 2026-11-06: stay on the free tier.** The request budget for reference:
 
 | Activity | LLM requests | At 40 per day (`MAX_REQUESTS_PER_DAY`) |
 |---|---|---|
@@ -75,20 +77,20 @@ NIST notes that some works may include third-party material under copyright. The
 | One golden-set run | about 80 to 120 | 2 to 3 days |
 | All experiments E1 to E7 | several hundred to about 1,000 | About three to four weeks |
 
-These figures are design estimates from ARCHITECTURE section 13, apart from the caption count, which is measured. Credits are only spent on paid models, so buying them does not change your free-models-only decision. The cap rises to 1,000 per day. The docs state this, but it has not been tested on your account.
+These figures are design estimates from ARCHITECTURE section 13, apart from the caption count, which is measured. Use `--offline`, `--max-requests 35` and `--resume`, and spread captioning over the first day. Revisit credits if this blocks M4 or M6.
 
-Staying at 50 per day works, but it is slow. Use `--offline`, `--max-requests 35` and `--resume`, and spread captioning over the first day.
+## Decisions (2026-11-06)
 
-## Needs your decision
+You chose to stay on the free tier and left the rest to Claude:
 
-1. **Add `OPENROUTER_API_KEY` to `.env`**, then run `scripts/preflight/s06_key_status.py`, `s10`, `s11`, `s12` and `s13`. They use at most 7 LLM requests. Until then nothing about real OpenRouter behaviour is verified.
-2. **OPEN-5:** buy credits or stay at 50 per day (recommendation above).
-3. **Docs disagree on two defaults.** `HISTORY_TURNS` is 6 in the PRD and 4 in `.env.example`. `MAX_IMAGES_PER_DOC` is 20 in the PRD and 10 in `.env.example` and ARCHITECTURE. M0 uses the `.env.example` values.
-4. **`IngestReport` gap.** F-ING-5 asks for caption requests and tokens, but the schema has only `caption_cost_usd`, which now always reads 0. Fixing it is a public schema change, so it needs your approval before M5.
-5. **`SemanticCache` has no `stats()`,** but the `CacheBackend` interface in ARCHITECTURE section 9 requires it. Decide at M6: wrap it or add the method to the reference code.
-6. **Reference comments still say "paid reference"** in `schemas.py` and `eval/metrics.py`. They are left as provided under the rule not to change reference code.
-7. **`docs/PREFLIGHT_PROMPT.md` still says to push a branch.** It is left as provided, because your instruction to work on `main` applied to this run.
-8. **Privacy.** Check the OpenRouter account setting for free models before uploading anything private (ARCHITECTURE section 18).
+1. **OPEN-5:** stay at 50 requests per day.
+2. **`HISTORY_TURNS` = 4 and `MAX_IMAGES_PER_DOC` = 10.** Lower token and request use. PRD corrected.
+3. **`IngestReport`:** added `caption_requests`, `caption_input_tokens` and `caption_output_tokens` (F-ING-5).
+4. **`SemanticCache.stats()`:** wrap it in an adapter at M6; reference code stays unchanged.
+5. **"Paid reference" comments and `docs/PREFLIGHT_PROMPT.md`:** left as provided.
+6. **`OPENROUTER_DATA_COLLECTION=allow`:** kept, because `deny` may leave no free endpoint and the corpus is public. Check the account's free-model privacy setting before uploading anything private (ARCHITECTURE section 18).
+
+Still open: start Docker Desktop before M8, and recheck the judge model at M4.
 
 ## Not done, by rule
 

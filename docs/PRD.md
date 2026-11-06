@@ -124,14 +124,14 @@ Everything in section 5 tagged MUST or SHOULD, plus COULD items if time allows.
 
 ### 5.5 Conversation memory
 
-- **F-CON-1 [MUST]** Server-side short-term memory: the last `HISTORY_TURNS` (default 6) turns per `session_id`, stored in SQLite.
+- **F-CON-1 [MUST]** Server-side short-term memory: the last `HISTORY_TURNS` (default 4) turns per `session_id`, stored in SQLite.
 - **F-CON-2 [MUST]** When history exists, the fast model rewrites the latest message into a standalone question (`StandaloneQuery`). Retrieval **and the cache** use the standalone question. With no history the call is skipped. *Accept:* "And what about shipping?" after a refund question retrieves shipping passages.
 
 ### 5.6 Multimodal
 
 - **F-MM-1 [MUST]** The chat accepts an optional image (PNG, JPEG, WebP, at most 5 MB). A vision call returns `ImageAnalysis`; its `search_query` combined with the user text drives retrieval, and the image is also passed to the answer model together with the passages.
 - **F-MM-2 [MUST]** Answers to image questions still cite document passages. The user's image is "your image", never a citable source.
-- **F-MM-3 [MUST]** Ingestion extracts embedded images from PDFs (and accepts standalone images), skips icons (under 100x100 px or under 5 KB) and duplicates (SHA-256), caps at `MAX_IMAGES_PER_DOC` (default 20), captions each with the vision model as `ImageCaption`, and indexes caption plus visible text as a chunk with `kind="image"`, page and `image_path`. Captions are cached on disk by image hash so re-ingesting never pays twice.
+- **F-MM-3 [MUST]** Ingestion extracts embedded images from PDFs (and accepts standalone images), skips icons (under 100x100 px or under 5 KB) and duplicates (SHA-256), caps at `MAX_IMAGES_PER_DOC` (default 10), captions each with the vision model as `ImageCaption`, and indexes caption plus visible text as a chunk with `kind="image"`, page and `image_path`. Captions are cached on disk by image hash so re-ingesting never pays twice.
 - **F-MM-4 [MUST]** A citation to an image chunk shows the image thumbnail next to the caption in the UI.
 - **F-MM-5 [COULD]** Voice question: audio to local Whisper (`faster-whisper`) to text, then the normal flow (OPEN-3).
 - **F-MM-6 [MUST]** Requests that carry an image never read or write the cache.
@@ -273,7 +273,7 @@ Total: about 12.5 focused days. The roadmap treats M0 to M5 as the main project 
 | OPEN-2 | Rerank on by default? | Decide from experiment E3 (accept if hit@5 improves by at least 3 points and p50 latency grows by under 300 ms) |
 | OPEN-3 | Include Whisper voice input (F-MM-5)? | Out until M8; add only if everything else is done |
 | OPEN-4 | Reference prices for shadow cost | Decided 2026-11-06: free models only, no paid reference model. `configs/pricing.yaml` holds a free model at 0, so shadow dollars read 0 |
-| OPEN-5 | Stay on 50 requests per day or buy credits? | Strongly recommended: a one-time purchase of at least 10 credits raises the cap to 1,000 requests per day (credits are only spent if you call paid models; free models stay free). Without it, a full golden-set run takes several days (see ARCHITECTURE section 13) |
+| OPEN-5 | Stay on 50 requests per day or buy credits? | Decided 2026-11-06: stay on the free tier at 50 requests per day for now. A full golden-set run takes several days (ARCHITECTURE section 13). Revisit if that blocks M4 or M6; a one-time purchase of at least 10 credits raises the cap to 1,000 per day |
 
 ## 11. Glossary
 

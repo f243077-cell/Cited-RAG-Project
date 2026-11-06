@@ -104,8 +104,12 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - Streamlit 1.67: `chat_input(accept_file=True)` returns `None` until submitted, then a `ChatInputValue` with `.text` (str), `.files`
   (list of `UploadedFile`) and `.audio`.
 - First run downloads the embedding model and PyTorch (large). Do it before a demo.
-- langchain-openai turns `max_tokens=` into `max_completion_tokens` in the request body. Seen on the fake server only: check that
-  OpenRouter honours it when the key is added. `response_metadata["model_name"]` holds the model named in the response.
+- langchain-openai sends `max_tokens=` as `max_completion_tokens`; the real service accepts it. `response_metadata["model_name"]` is
+  the serving model (verified live). Output tokens include hidden reasoning (64 of 78 on one short answer).
+- **A 429 can arrive inside an HTTP 200 body** as `ValueError({'code': 429, ...})`: `classify_error` says `provider_body` with
+  `http_status=429`. The gateway must treat that as a rate limit, not a plain retry.
+- **CrewAI prompts "Share this execution trace?" on first run** despite telemetry off (20 s block). Use `Crew(tracing=False)`.
+- `GET /api/v1/key` read `used: 3` after 5 real attempts. Trust the local `llm_calls` count.
 - **LlamaIndex overwrites `doc_id` in vector-store metadata** with `node.ref_doc_id or "None"`. On a bare `TextNode` a `doc_id` filter
   returns nothing, silently. Set `node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(node_id=doc_id)`.
 - **LlamaIndex embeds node metadata by default.** Set `excluded_embed_metadata_keys` and `excluded_llm_metadata_keys` to all metadata
@@ -115,8 +119,11 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - The embedding model lands in llama_index's cache (`platformdirs.user_cache_dir("llama_index")`), not `~/.cache/huggingface`.
 - OpenRouter's free list has more than chat models: `openrouter/free` (router), `google/lyria-*` (audio output) and `stealth/*` (no
   `:free` suffix) all show price 0. `scripts/pick_free_models.py` filters them.
-- Not yet verified against real OpenRouter (no key at preflight; run `scripts/preflight/s*.py`): structured output, tools, images,
-  `require_parameters`, real rate-limit headers, real token counts, the metadata key for the serving model.
+- `MIN_TOP_SIMILARITY=0.30` is too low to refuse much: a refund question with no answer in the NIST corpus scored cosine 0.54
+  against it. Calibrate at M4 on the unanswerable items; do not change it by hand before then.
+- `citerag ingest --via-api` does not exist yet: it needs `POST /v1/documents`, which arrives with the Library page in M3.
+- Not yet verified against real OpenRouter: the judge model (upstream 429 on its one call, so `temperature` is untested), real
+  rate-limit headers, `data_collection` on the real service.
 
 ## Conventions
 
