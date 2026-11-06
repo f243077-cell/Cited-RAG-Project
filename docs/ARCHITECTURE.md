@@ -577,6 +577,7 @@ At 50 requests per day one golden-set run takes two to three days and the whole 
 | `citerag ingest PATH [--index-dir D] [--via-api]` | Ingest a file or folder |
 | `citerag cache clear` / `cache stats` | Cache admin |
 | `citerag eval retrieval [--golden F] [--index-dir D] [--rerank] [--skip-type T] [--require-verified]` | hit@k and MRR before and after rerank, plus gate cosines; zero LLM requests (M2) |
+| `citerag eval explain ITEM_ID [--golden F] [--index-dir D]` | One item: first gold rank for vector, BM25 and hybrid, plus the stored text of its gold pages; zero LLM requests (M2) |
 | `citerag eval run --suite golden [--config F] [--offline] [--via-api] [--limit N] [--max-requests N] [--resume RUN_ID] [--llm-disk-cache]` | Score the system; offline = retrieval metrics only, zero LLM requests; runs append to `items.jsonl` item by item so they can resume |
 | `citerag eval compare RUN_A RUN_B` | Delta table |
 | `citerag eval cache-sweep --pairs eval/cache_pairs.jsonl` | Threshold analysis |

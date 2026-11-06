@@ -38,6 +38,8 @@ uv run uvicorn citerag.api.main:app --reload --port 8000
 uv run streamlit run src/citerag/ui/app.py
 uv run citerag ingest data/sample         # stop the API first (single-writer Chroma) or add --via-api
 uv run citerag eval retrieval --rerank --skip-type image --index-dir data/index_eval   # hit@k, MRR, zero LLM requests
+uv run citerag eval explain a-017 --index-dir data/index_eval   # one item: ranks per retriever, gold page text
+uv run python scripts/audit_gold_pages.py --index-dir data/index_eval   # pages with the answer's terms that are not gold
 uv run python scripts/pick_free_models.py   # list free models by capability and suggest .env lines (M0)
 uv run citerag eval run --suite golden --offline   # retrieval metrics only, zero LLM requests
 uv run citerag eval run --suite golden --max-requests 35 --resume <run_id>   # spread over free-tier days
@@ -124,6 +126,9 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   0.77 against 0.70 to 0.88 for answerable items, so refusing them is the model's job. Calibrate `MIN_TOP_SIMILARITY` at M4 only.
 - Golden `page` is the stored PDF position from 1 (pypdf), never the printed number; `doc` must equal the stored `doc_name` exactly.
 - About 10 of the 29 images that pass the size filter sit on cover pages. Look at this in M5: each caption is one LLM request.
+- **BM25's tokenizer drops one-character tokens**, so `PS.1` becomes `ps` and identifiers that differ by a digit look the same.
+- **A page-level hit may not hold the answer.** Golden sources are pages, so a chunk on the right page counts even if it misses the
+  answer. Audit gold pages with `scripts/audit_gold_pages.py`: an exact phrase missed page 3 for `a-007`.
 - **BM25 pads its results with score-0 chunks** that match no query term, and rank fusion rewards those ranks. Keep the
   `_MatchingBM25` wrapper in `index/retriever.py`.
 - `citerag ingest --via-api` does not exist yet: it needs `POST /v1/documents`, which arrives with the Library page in M3.
