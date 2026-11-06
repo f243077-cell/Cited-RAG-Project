@@ -80,6 +80,13 @@ class IndexStore:
     def count(self) -> int:
         return self._collection.count()
 
+    def has_chunks(self, doc_ids: list[str] | None = None) -> bool:
+        if doc_ids is None:
+            return self.count() > 0
+        if not doc_ids:
+            return False
+        return bool(self._collection.get(where={"doc_id": {"$in": doc_ids}}, limit=1, include=[])["ids"])
+
     def docstore_count(self) -> int:
         return len(self._context.docstore.docs)
 

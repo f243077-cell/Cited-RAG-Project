@@ -14,9 +14,17 @@ from citerag.config import Settings
 from citerag.errors import CiteRAGError, NotFoundError
 from citerag.index.store import IndexStore
 from citerag.ingest.chunking import chunk_pages
-from citerag.ingest.loaders import compute_doc_id, extension, load_pages, sanitize_name, validate_file
+from citerag.ingest.loaders import (
+    SKIPPED_NAMES,
+    compute_doc_id,
+    extension,
+    load_pages,
+    sanitize_name,
+    validate_file,
+)
 from citerag.ingest.manifest import (
     DocEntry,
+    Manifest,
     check_manifest,
     current_namespace,
     load_manifest,
@@ -26,7 +34,6 @@ from citerag.ingest.manifest import (
 from citerag.schemas import ErrorCode, IngestReport
 
 logger = logging.getLogger(__name__)
-_SKIPPED_NAMES = {"SOURCES.md"}  # the licence table scripts/fetch_sample.py writes next to the corpus
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,10 @@ class Ingestor:
         if existing is not None:
             check_manifest(existing, settings, store.embedding_dim)
         self._manifest = existing or new_manifest(settings, store.embedding_dim)
+
+    @property
+    def manifest(self) -> Manifest:
+        return self._manifest
 
     def ingest_bytes(self, name: str, data: bytes) -> IngestReport:
         """Everything that can fail runs before the first write; new chunks go in before old ones go out."""
@@ -107,6 +118,17 @@ class Ingestor:
             duration_ms=_elapsed_ms(started),
         )
 
+    def delete(self, doc_id: str) -> None:
+        entry = self._manifest.docs.get(doc_id)
+        if entry is None:
+            raise NotFoundError(f"no document {doc_id}")
+        self._store.delete_doc(doc_id)
+        self._store.persist()
+        (self._uploads / f"{doc_id}{extension(entry.name)}").unlink(missing_ok=True)
+        del self._manifest.docs[doc_id]
+        save_manifest(self._index_dir, self._manifest)
+        self._cache.invalidate_except(current_namespace(self._settings, self._manifest))
+
     def ingest_path(self, path: Path) -> tuple[list[IngestReport], list[IngestFailure]]:
         """A file or a folder (recursive). One bad file does not stop the others."""
         if not path.exists():
@@ -115,7 +137,7 @@ class Ingestor:
         reports: list[IngestReport] = []
         failures: list[IngestFailure] = []
         for file in files:
-            if path.is_dir() and file.name in _SKIPPED_NAMES:
+            if path.is_dir() and file.name in SKIPPED_NAMES:
                 continue
             try:
                 reports.append(self.ingest_bytes(file.name, file.read_bytes()))

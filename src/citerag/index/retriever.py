@@ -143,6 +143,9 @@ class HybridRetriever:
             key=lambda c: (c.doc_name, c.page or 0, c.chunk_id),
         )
 
+    def has_documents(self, doc_ids: list[str] | None = None) -> bool:
+        return self._store.has_chunks(doc_ids)
+
     def embed_query(self, query: str) -> list[float]:
         return self._store.embed_query(query)
 

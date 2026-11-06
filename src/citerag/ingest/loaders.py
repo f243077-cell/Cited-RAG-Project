@@ -15,6 +15,7 @@ from pypdf.errors import PyPdfError
 from citerag.errors import FileTooLargeError, InvalidFileTypeError
 
 FileKind = Literal["pdf", "text", "image"]
+SKIPPED_NAMES = {"SOURCES.md"}  # the licence table scripts/fetch_sample.py writes next to the corpus
 
 _KIND_BY_EXTENSION: dict[str, FileKind] = {
     ".pdf": "pdf",
