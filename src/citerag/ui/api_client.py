@@ -5,7 +5,15 @@ from __future__ import annotations
 import httpx
 from pydantic import ValidationError
 
-from citerag.schemas import ChatRequest, ChatResponse, DocumentInfo, ErrorResponse, IngestReport
+from citerag.schemas import (
+    ChatRequest,
+    ChatResponse,
+    DocumentInfo,
+    ErrorResponse,
+    IngestReport,
+    RunDetail,
+    RunSummary,
+)
 
 _TIMEOUT = httpx.Timeout(300.0, connect=5.0)  # an answer can take several slow free-model calls
 
@@ -51,6 +59,12 @@ class ApiClient:
 
     def delete_session(self, session_id: str) -> None:
         self._send("DELETE", f"/v1/sessions/{session_id}")
+
+    def eval_runs(self) -> list[RunSummary]:
+        return [RunSummary.model_validate(r) for r in self._send("GET", "/v1/eval/runs").json()]
+
+    def eval_run(self, run_id: str) -> RunDetail:
+        return RunDetail.model_validate_json(self._send("GET", f"/v1/eval/runs/{run_id}").text)
 
     def health(self) -> dict:
         return self._send("GET", "/health").json()
