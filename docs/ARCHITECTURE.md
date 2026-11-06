@@ -97,6 +97,7 @@ flowchart LR
     FS[("Uploads, images, captions")]
   end
   LLM[["OpenRouter API"]]
+  GEM[["Gemini API (OpenAI-compatible)"]]
   FE -->|"HTTP + SSE"| RT
   RT --> PL
   RT --> IN
@@ -111,7 +112,8 @@ flowchart LR
   RE --> DS
   CA --> SQ
   PL --> SQ
-  GW --> LLM
+  GW -->|"fast, strong"| LLM
+  GW -->|"vision, judge"| GEM
   AG --> LLM
   IN --> FS
 ```
@@ -181,7 +183,7 @@ citerag/
 
 `requests` (one row per chat request): `request_id` PK, `ts`, `session_id`, `mode`, `message`, `standalone_query`, `has_image`, `cache_enabled`, `cache_hit`, `cache_similarity`, `top_similarity`, `answerable`, `n_citations`, `n_valid_citations`, `confidence`, `n_retries`, `input_tokens`, `output_tokens`, `llm_requests`, `est_cost_usd` (shadow), `saved_usd` (shadow), `saved_requests`, `lat_total`, `lat_condense`, `lat_embed`, `lat_cache`, `lat_retrieve`, `lat_rerank`, `lat_generate`, `lat_verify`, `prompt_version`, `models_json`, `error_code`.
 
-`llm_calls` (one row per model call): `id`, `request_id` (nullable for ingestion and eval), `ts`, `role` (`condense`, `rewrite`, `generate`, `vision`, `caption`, `judge`, `crew`), `model` (the model that answered, read from the response, not from the request), `attempt`, `http_status`, `error_kind` (from `classify_error`), `input_tokens`, `output_tokens`, `shadow_usd`, `latency_ms`, `ok`. **Every HTTP attempt is one row, including 429s and failures**, because the daily request guard counts rows.
+`llm_calls` (one row per model call): `id`, `request_id` (nullable for ingestion and eval), `ts`, `role` (`condense`, `rewrite`, `generate`, `vision`, `caption`, `judge`, `crew`), `provider` (`openrouter` or `gemini`; each provider's daily guard counts its own rows), `model` (the model that answered, read from the response, not from the request), `attempt`, `http_status`, `error_kind` (from `classify_error`), `input_tokens`, `output_tokens`, `shadow_usd`, `latency_ms`, `ok`. **Every HTTP attempt is one row, including 429s and failures**, because the daily request guard counts rows.
 
 `messages`: `id`, `session_id`, `ts`, `role` (`user` / `assistant`), `content`, `request_id`.
 
@@ -416,7 +418,11 @@ Reference code: `cache/semantic_cache.py` and `cache/namespace.py` (Appendix A).
 
 The docs grant the higher ceiling from one credit below the threshold (9 today) to absorb fees. `GET /api/v1/key` returns `is_free_tier` and `free_model_daily_requests` (`used`, `limit`, `remaining`); the per-minute limit is not reported there. The unit is the HTTP request, so condense, rewrite, regeneration, each retry, each image caption, each judge call and each CrewAI agent step all count. A negative credit balance can break even free models. Relevant errors: 429 rate limited; 402 insufficient credits (without `Retry-After` it means add credits, not wait); 503 no provider matches your routing needs; 502 model down; and an error can arrive **inside an HTTP 200 body**. Section 13 turns this into a request budget.
 
-**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06: `nvidia/nemotron-3.5-super-vl:free` for fast, strong and vision (verified live), `xingchen-agi/xing4.0-29b-a4b:free` for judge (not yet verified, upstream 429 on its one call).
+**Second provider: Gemini.** Owner decision, 2026-11-06. Gemini is reached through its OpenAI-compatible endpoint (`GEMINI_BASE_URL`, default `https://generativelanguage.googleapis.com/v1beta/openai/`) with the same `ChatOpenAI` client, so parsing, retries and error classification are shared. `PROVIDER_FAST`, `PROVIDER_STRONG`, `PROVIDER_VISION` and `PROVIDER_JUDGE` choose `openrouter` or `gemini` per role; fast and strong start on OpenRouter, vision and judge on Gemini. Each provider has its own rate limiter (`LLM_MAX_RPM`, `GEMINI_MAX_RPM`) and its own daily guard (`MAX_REQUESTS_PER_DAY`, `GEMINI_MAX_REQUESTS_PER_DAY`), and `llm_calls` gains a `provider` column that the guard filters on. Gemini clients get no OpenRouter `provider` body or attribution headers. `GEMINI_API_KEY` is optional at start-up and checked on the first call from a Gemini role.
+
+Google's docs (read 2026-11-06) say limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in AI Studio, so the Gemini defaults are low guesses. The guard stays a rolling 24 hours, which is stricter than Google's reset except just after midnight Pacific. The pricing page marks free-tier content as used to improve Google's products, so captioned images and judged passages must be ones the owner is comfortable sharing.
+
+**Model roles.** The free list changes often and models disappear, so IDs live only in `.env`, and `scripts/pick_free_models.py` proposes them. Picks on 2026-11-06: `nvidia/nemotron-3.5-super-vl:free` for fast and strong (verified live), `gemini-3.8-flash` for vision and judge (owner's pick; **not working yet**: every generation request in the spike timed out, see the CLAUDE.md gotchas).
 
 | Role | Env var | Used for | Must support |
 |---|---|---|---|
@@ -458,9 +464,10 @@ class LLMGateway(Protocol):
 4. **Retry loop** (`LLM_MAX_RETRIES`, default 2, so up to 3 attempts), per attempt: wait for the limiter (`while (w := limiter.try_acquire()) > 0: await asyncio.sleep(w)`), check the daily guard, call, write an `llm_calls` row, then `classify_error(exc)`. `rate_limit` and `overloaded`: sleep `retry_after_s` or `2 ** attempt` seconds. `server`, `timeout`, `provider_body`: back off and retry. `parse`: append the validation error to the user message and retry (F-STR-1). `auth`, `credits`, `unknown`, and `bad_request` after the method switch: raise at once. Final failure raises `LLMUnavailableError` (503) or `StructuredOutputError` (502).
 5. **Errors inside HTTP 200:** langchain-openai raises `ValueError(<error dict>)` on a plain call and `TypeError` on the structured path; both classify as `provider_body` and are retried.
 6. **Daily guard (`llm/budget.py`):** count `llm_calls` rows in a rolling 24 hours (the reset time is not stated in the documentation read) and raise `budget_exceeded` once `MAX_REQUESTS_PER_DAY` is reached. Cache hits never call it. For CrewAI runs call `limiter.try_acquire(n)` to reserve `n` slots first, then log the real requests afterwards.
-7. **Eval disk cache (optional, eval only):** a directory keyed by `sha256(model, messages, schema name, sampling)` that returns a stored response instead of calling the API, so a repeated eval run costs no requests. Switched on only by `citerag eval run --llm-disk-cache`; never in the live app, never in `bench-cache`, never in repeated variance runs (F-EVA-8).
-8. **Cost fields:** `shadow_usd = estimate_cost_usd(model, in, out, pricing)` (Appendix A). The project uses free models only (owner decision, 2026-11-06), so the reference in `configs/pricing.yaml` is a free model at 0 and shadow dollars read 0; compare runs by requests and tokens.
-9. **`FakeGateway`** (`llm/fake.py`): returns queued Pydantic objects keyed by `call_name`, records every call, can raise on demand. Pipeline unit tests use only this. Gateway tests use `FakeOpenRouter` (`tests/fake_openai_server.py`, Appendix A), a real HTTP server on localhost, so the retry, parsing and counting code is exercised end to end.
+7. **Provider scope:** the limiter and the daily guard are chosen by `provider_of(settings, role)`, so one provider reaching its limit never blocks the other.
+8. **Eval disk cache (optional, eval only):** a directory keyed by `sha256(model, messages, schema name, sampling)` that returns a stored response instead of calling the API, so a repeated eval run costs no requests. Switched on only by `citerag eval run --llm-disk-cache`; never in the live app, never in `bench-cache`, never in repeated variance runs (F-EVA-8).
+9. **Cost fields:** `shadow_usd = estimate_cost_usd(model, in, out, pricing)` (Appendix A). The project uses free models only (owner decision, 2026-11-06), so the reference in `configs/pricing.yaml` is a free model at 0 and shadow dollars read 0; compare runs by requests and tokens.
+10. **`FakeGateway`** (`llm/fake.py`): returns queued Pydantic objects keyed by `call_name`, records every call, can raise on demand. Pipeline unit tests use only this. Gateway tests use `FakeOpenRouter` (`tests/fake_openai_server.py`, Appendix A), a real HTTP server on localhost, so the retry, parsing and counting code is exercised end to end.
 
 ## 12. Agents (CrewAI)
 
@@ -616,7 +623,7 @@ curl -s localhost:8000/v1/chat -H 'content-type: application/json' \
 
 ## 15. Frontend and dashboard (Streamlit)
 
-Structure: `ui/app.py` (entry and sidebar), `ui/pages/1_Chat.py`, `2_Library.py`, `3_Dashboard.py`, `4_Evaluation.py`, `ui/api_client.py` (httpx wrapper that returns Pydantic models). The UI imports only `schemas` and `analytics.plots`; never backend internals (F-UI-6).
+Structure: `ui/app.py` (entry and sidebar), `ui/pages/1_Chat.py`, `2_Library.py`, `3_Dashboard.py`, `4_Evaluation.py`, `ui/api_client.py` (httpx wrapper that returns Pydantic models). The UI imports only `schemas`, `analytics.plots` and one exception, `config.UISettings`; never backend internals (F-UI-6). `UISettings` holds just `API_BASE_URL` and `CITERAG_API_KEY`: rule 9 forbids reading the environment elsewhere, and the full `Settings` would make the UI process load the OpenRouter and Gemini keys.
 
 - **State:** `st.session_state` holds `session_id` (uuid), the message list, and the toggles. History is also stored server-side; the UI only displays it.
 - **Chat input:** `st.chat_input(..., accept_file=True, file_type=["png", "jpg", "jpeg", "webp"])` returns `None` until submitted, then a `ChatInputValue` with `.text` (str), `.files` (list of `UploadedFile`) and `.audio` (verified on 1.67). Show progress with `st.status` driven by SSE, or a spinner in v1.
@@ -2331,13 +2338,25 @@ OPENROUTER_TITLE=CiteRAG                         # optional app-attribution head
 OPENROUTER_REQUIRE_PARAMETERS=true               # route only to endpoints that support response_format / tools
 OPENROUTER_DATA_COLLECTION=allow                 # "deny" avoids providers that store or train on prompts; may leave no free endpoint (503)
 
+# --- Gemini, second provider through its OpenAI-compatible endpoint ---
+GEMINI_API_KEY=
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_MAX_RPM=5                                 # low guess: Google publishes no free-tier numbers, see AI Studio
+GEMINI_MAX_REQUESTS_PER_DAY=20                   # low guess; Google's daily quota resets at midnight Pacific
+
+# --- Provider per role: openrouter | gemini ---
+PROVIDER_FAST=openrouter
+PROVIDER_STRONG=openrouter
+PROVIDER_VISION=gemini
+PROVIDER_JUDGE=gemini
+
 # --- Models (all exist with the needed capabilities in OpenRouter's list on 2026-11-06; none called yet) ---
 # The free list changes often. In M0 run `uv run python scripts/pick_free_models.py` and paste its picks here.
 # Needs: vision = image input; fast/strong/judge = structured outputs (response_format) or tool calling.
 MODEL_FAST=nvidia/nemotron-3.5-super-vl:free
 MODEL_STRONG=nvidia/nemotron-3.5-super-vl:free
-MODEL_VISION=nvidia/nemotron-3.5-super-vl:free
-MODEL_JUDGE=google/gemma-4-31b-it:free           # use a different model than the answerer to reduce self-preference bias
+MODEL_VISION=your-gemini-flash-model              # id must belong to PROVIDER_VISION
+MODEL_JUDGE=your-gemini-flash-model               # id must belong to PROVIDER_JUDGE; a different model than the answerer reduces self-preference bias
 STRUCTURED_METHOD=auto                           # auto (json_schema, then tools) | json_schema | tools
 
 # --- LLM gateway ---

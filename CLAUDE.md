@@ -81,11 +81,13 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 5. **Pipeline = plain async functions** (`rag/pipeline.py`). No LangGraph, no hidden agent loops in the default path.
 6. **Documents are untrusted data.** Passages go inside the escaped `<documents>` block via `render_passages`; never
    f-string document text into a prompt or a CrewAI task template (pass it via `kickoff(inputs=...)`).
-7. **Only the backend opens Chroma.** The UI imports `schemas` and `analytics.plots` only and talks to the API over HTTP.
+7. **Only the backend opens Chroma.** The UI imports `schemas`, `analytics.plots` and one exception, `config.UISettings`, and
+   talks to the API over HTTP. `UISettings` holds only `API_BASE_URL` and `CITERAG_API_KEY`, so the UI never loads provider keys.
 8. **Prompts live in `src/citerag/prompts/*.md`** with a `version:` header; the version is logged per request.
 9. **Config via `config.py` (pydantic-settings)**; no `os.environ` reads elsewhere. `configs/pricing.yaml` holds only *shadow*
    prices. Free models only (owner decision, 2026-11-06): no paid reference model, so shadow dollars read 0.
-10. Cache stores only answerable, fully verified, standard-mode, no-image answers, and is scoped by `namespace`.
+10. Cache stores only answerable, fully verified, standard-mode, no-image answers, and is scoped by `namespace`. Fully verified
+    means every citation is valid **and** verification raised no problem: an unbacked `[n]` or a dropped citation also blocks it.
 
 ## Gotchas (verified while preparing the design; add new ones here as you find them)
 
@@ -131,9 +133,20 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   answer. Audit gold pages with `scripts/audit_gold_pages.py`: an exact phrase missed page 3 for `a-007`.
 - **BM25 pads its results with score-0 chunks** that match no query term, and rank fusion rewards those ranks. Keep the
   `_MatchingBM25` wrapper in `index/retriever.py`.
-- `citerag ingest --via-api` does not exist yet: it needs `POST /v1/documents`, which arrives with the Library page in M3.
-- Not yet verified against real OpenRouter: the judge model (upstream 429 on its one call, so `temperature` is untested), real
-  rate-limit headers, `data_collection` on the real service.
+- **The relevance gate does not refuse off-topic questions at 0.30:** "What is the capital of France?" scored cosine 0.411, so the
+  model did the refusing. Keep counting that as a model decision until M4 calibrates `MIN_TOP_SIMILARITY`.
+- Streamlit logs two 404s for `<page>/_stcore/health` and `host-config` on a direct page URL such as `/Chat`. They are harmless.
+- Not yet verified against real OpenRouter: real rate-limit headers, `data_collection` on the real service.
+- **`gemini-3.8-flash` generated nothing in the spike (2026-11-06), so vision and judge do not work yet.** Through the OpenAI
+  endpoint, three generation requests all hit the client timeout with no HTTP status: structured output at 60 s and 180 s, plain
+  text at 90 s. The hang is not `response_format`. `GET /models` (61 models, 1.6 s) and a POST naming an unknown model (404 in 0.5 s)
+  both work, so network, key and URL are fine. Structured output, images, tool calling and `temperature` are all still unverified.
+  Requests used: 4 of 5. The native `generateContent` path was not tried.
+- **A hanging provider is expensive:** with the defaults one call waits about 186 s (3 attempts of 60 s plus backoff) and takes 3
+  slots of that provider's daily guard. Long runs must stop on `llm_unavailable` instead of moving to the next item.
+- Gemini limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in
+  AI Studio. Google marks free-tier content as used to improve its products.
+- Gemini's OpenAI endpoint returns errors as a list, `[{'error': {...}}]`, not an object; the SDK status code is still right.
 
 ## Conventions
 
