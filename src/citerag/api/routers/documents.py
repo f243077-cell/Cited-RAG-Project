@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 
 from citerag.api.deps import Services, get_app_settings, get_services, require_api_key
 from citerag.config import Settings
@@ -34,10 +34,11 @@ def upload(
     files: Annotated[list[UploadFile], File()],
     services: Annotated[Services, Depends(get_services)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    captions: Annotated[bool, Form()] = False,  # each new image is one free-tier request, so opt-in
 ) -> list[IngestReport]:
     loaded = _read_valid(files, settings.max_upload_mb)
-    with services.deps.index_lock:  # captions can take minutes; chat waits, but an upload is rare
-        reports = [services.ingestor.ingest_bytes(name, data) for name, data in loaded]
+    with services.deps.index_lock:  # with captions on, chat waits; each caption is capped at 60 s
+        reports = [services.ingestor.ingest_bytes(name, data, captions) for name, data in loaded]
         services.retriever.refresh()
     return reports
 

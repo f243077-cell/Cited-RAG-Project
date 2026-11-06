@@ -42,7 +42,7 @@ def ingest(
 ) -> None:
     """Add documents to the index. Stop the API first, or use --via-api: Chroma allows one writer process."""
     if via_api:
-        _ingest_via_api(path)
+        _ingest_via_api(path, captions)
         return
     from citerag.eval.experiments import apply_overrides, load_experiment
     from citerag.index.store import open_store  # loads the heavy frameworks, so not at import time
@@ -88,7 +88,7 @@ def ingest(
         raise typer.Exit(1)
 
 
-def _ingest_via_api(path: Path) -> None:
+def _ingest_via_api(path: Path, captions: bool = False) -> None:
     """One upload per file, so one bad file does not stop the others."""
     from citerag.ingest.loaders import SKIPPED_NAMES
     from citerag.ui.api_client import ApiClient, ApiError
@@ -106,7 +106,7 @@ def _ingest_via_api(path: Path) -> None:
         if path.is_dir() and file.name in SKIPPED_NAMES:
             continue
         try:
-            for r in client.upload([(file.name, file.read_bytes())]):
+            for r in client.upload([(file.name, file.read_bytes())], captions):
                 typer.echo(f"{r.doc_name}: {r.status} ({r.pages or '-'} pages, {r.chunks} chunks)")
         except ApiError as exc:
             failed += 1

@@ -11,12 +11,14 @@ from citerag.ui.api_client import ApiError
 
 class StubClient:
     uploaded: list[str] = []
+    captions: list[bool] = []
 
     def __init__(self, base_url, api_key=None):
         pass
 
-    def upload(self, files):
+    def upload(self, files, captions=False):
         name = files[0][0]
+        StubClient.captions.append(captions)
         StubClient.uploaded.append(name)
         if name == "bad.exe":
             raise ApiError("invalid_file_type", "not allowed")
@@ -25,7 +27,7 @@ class StubClient:
 
 @pytest.fixture
 def folder(tmp_path, monkeypatch):
-    StubClient.uploaded = []
+    StubClient.uploaded, StubClient.captions = [], []
     monkeypatch.setattr(api_client, "ApiClient", StubClient)
     (tmp_path / "a.md").write_text("alpha")
     (tmp_path / "SOURCES.md").write_text("licences")
@@ -49,3 +51,9 @@ def test_one_bad_file_does_not_stop_the_others_and_exits_nonzero(folder):
 def test_missing_path_fails_with_a_message(tmp_path):
     result = CliRunner().invoke(cli.app, ["ingest", str(tmp_path / "nope"), "--via-api"])
     assert result.exit_code == 1 and "not_found" in result.stdout
+
+
+def test_captions_stay_off_unless_asked_for(folder):
+    CliRunner().invoke(cli.app, ["ingest", str(folder), "--via-api"])
+    CliRunner().invoke(cli.app, ["ingest", str(folder), "--via-api", "--captions"])
+    assert StubClient.captions == [False, True]

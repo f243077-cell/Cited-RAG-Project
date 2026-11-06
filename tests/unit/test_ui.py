@@ -220,3 +220,46 @@ def test_an_image_with_no_text_gets_a_default_question(monkeypatch):
     client = StubClient(response())
     run_page(monkeypatch, "1_Chat.py", client)
     assert client.requests[0].message == "What does this image show?"
+
+
+def uploading_client(monkeypatch):
+    client = StubClient()
+    client.sent = []
+    client.upload = lambda files, captions=False: client.sent.append(captions) or []
+    monkeypatch.setattr(
+        st, "file_uploader", lambda *a, **k: [SimpleNamespace(name="a.pdf", getvalue=lambda: b"x")]
+    )
+    return client
+
+
+def ingest_button(app):
+    return next(b for b in app.button if b.label == "Ingest")
+
+
+def test_the_caption_toggle_is_visible_and_off_by_default(monkeypatch):
+    client = uploading_client(monkeypatch)
+    app = run_page(monkeypatch, "2_Library.py", client)
+    assert app.toggle[0].label == "Caption images inside documents" and app.toggle[0].value is False
+    ingest_button(app).click().run()
+    assert client.sent == [False]
+
+
+def test_turning_the_toggle_on_warns_and_sends_captions(monkeypatch):
+    client = uploading_client(monkeypatch)
+    app = run_page(monkeypatch, "2_Library.py", client)
+    app.toggle[0].set_value(True).run()
+    assert any("one LLM request" in c.value for c in app.caption)
+    ingest_button(app).click().run()
+    assert client.sent == [True]
+
+
+def test_the_client_sends_the_caption_choice_as_a_form_field():
+    seen = []
+
+    def handler(request):
+        seen.append(request.content)
+        return httpx.Response(200, json=[])
+
+    _client(handler).upload([("a.md", b"x")])
+    _client(handler).upload([("a.md", b"x")], captions=True)
+    assert b'name="captions"' in seen[0] and b"false" in seen[0] and b"true" in seen[1]

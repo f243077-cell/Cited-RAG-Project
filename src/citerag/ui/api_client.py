@@ -49,9 +49,10 @@ class ApiClient:
     def documents(self) -> list[DocumentInfo]:
         return [DocumentInfo.model_validate(d) for d in self._send("GET", "/v1/documents").json()]
 
-    def upload(self, files: list[tuple[str, bytes]]) -> list[IngestReport]:
+    def upload(self, files: list[tuple[str, bytes]], captions: bool = False) -> list[IngestReport]:
         parts = [("files", (name, data)) for name, data in files]
-        response = self._send("POST", "/v1/documents", files=parts)
+        fields = {"captions": str(captions).lower()}
+        response = self._send("POST", "/v1/documents", files=parts, data=fields)
         return [IngestReport.model_validate(r) for r in response.json()]
 
     def delete_document(self, doc_id: str) -> None:

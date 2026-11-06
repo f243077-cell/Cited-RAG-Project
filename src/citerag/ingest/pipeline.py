@@ -97,11 +97,13 @@ class Ingestor:
         sha = hashlib.sha256(data).hexdigest()
         return ImageBatch(1, [FoundImage(sha, data, media_type, None, len(data))])
 
-    def _caption(self, doc_id: str, doc_name: str, images: list[FoundImage]) -> _Captions:
+    def _caption(
+        self, doc_id: str, doc_name: str, images: list[FoundImage], allowed: bool = True
+    ) -> _Captions:
         """Runs before any write. Budget or provider trouble stops the calls but never fails the document:
         its text still goes in, the images count as skipped, and a later ingest fills them in."""
         done = _Captions()
-        stopped = self._captioner is None
+        stopped = self._captioner is None or not allowed
         for image in images:
             caption = self._images.cached_caption(image.sha256)
             if caption is None and not stopped:
@@ -145,7 +147,7 @@ class Ingestor:
             self._cache.invalidate_except(current_namespace(self._settings, self._manifest))
         return done
 
-    def ingest_bytes(self, name: str, data: bytes) -> IngestReport:
+    def ingest_bytes(self, name: str, data: bytes, captions: bool = True) -> IngestReport:
         """Everything that can fail runs before the first write; new chunks go in before old ones go out."""
         started = time.perf_counter()
         doc_name = sanitize_name(name)
@@ -154,7 +156,8 @@ class Ingestor:
 
         known = self._manifest.docs.get(doc_id)
         if known is not None:
-            done = self._add_missing_images(doc_id, known, kind, data) if self._captioner else None
+            wanted = captions and self._captioner is not None
+            done = self._add_missing_images(doc_id, known, kind, data) if wanted else None
             return IngestReport(
                 doc_id=doc_id,
                 doc_name=known.name,
@@ -171,8 +174,8 @@ class Ingestor:
             loaded.pages, doc_id, doc_name, self._settings.chunk_size, self._settings.chunk_overlap
         )
         batch = self._find_images(kind, doc_name, data)
-        captions = self._caption(doc_id, doc_name, batch.kept)
-        nodes = [*nodes, *captions.nodes]
+        added = self._caption(doc_id, doc_name, batch.kept, captions)
+        nodes = [*nodes, *added.nodes]
         previous = [old for old, entry in self._manifest.docs.items() if entry.name == doc_name]
         if nodes:
             self._store.add_nodes(nodes)
@@ -192,7 +195,7 @@ class Ingestor:
             sha256=hashlib.sha256(data).hexdigest(),
             pages=loaded.page_count,
             chunks=len(nodes),
-            images=len(captions.nodes),
+            images=len(added.nodes),
             size_bytes=len(data),
             ingested_at=datetime.now(UTC),
         )
@@ -207,7 +210,7 @@ class Ingestor:
             chunks=len(nodes),
             images_found=batch.found,
             duration_ms=_elapsed_ms(started),
-            **_caption_fields(captions, batch.found),
+            **_caption_fields(added, batch.found),
         )
 
     def delete(self, doc_id: str) -> None:

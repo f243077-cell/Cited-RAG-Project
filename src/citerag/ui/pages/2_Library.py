@@ -15,10 +15,18 @@ client = common.get_client()
 uploaded = st.file_uploader(
     "Add documents", type=["pdf", "md", "markdown", "txt", "png", "jpg", "jpeg"], accept_multiple_files=True
 )
+captions = st.toggle(
+    "Caption images inside documents",
+    value=False,
+    help="Makes figures searchable. Each new image is one free-tier LLM request, up to 10 per document.",
+)
+if captions:
+    st.caption("Each new image uses one LLM request and can take up to 60 s. Stored captions are free.")
 if uploaded and st.button("Ingest"):
     try:
         with st.spinner("Ingesting"):
-            st.session_state["last_report"] = client.upload([(f.name, f.getvalue()) for f in uploaded])
+            files = [(f.name, f.getvalue()) for f in uploaded]
+            st.session_state["last_report"] = client.upload(files, captions)
     except ApiError as exc:
         st.error(exc.message)
 

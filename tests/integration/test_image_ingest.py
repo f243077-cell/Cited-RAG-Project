@@ -1,13 +1,18 @@
 """Captions through real Chroma and BM25 with a fake captioner: image chunks are searchable and citable."""
 
 import pytest
+from fastapi.testclient import TestClient
 
+from citerag.api.deps import Services
+from citerag.api.main import create_app
 from citerag.errors import BudgetExceededError, LLMUnavailableError, StructuredOutputError
 from citerag.index.retriever import HybridRetriever
 from citerag.index.store import IndexStore
 from citerag.ingest.manifest import current_namespace
 from citerag.ingest.pipeline import Ingestor
+from citerag.llm.fake import FakeGateway
 from citerag.llm.gateway import StructuredResult
+from citerag.rag.pipeline import Deps
 from citerag.schemas import ImageCaption
 from tests.helpers import HashEmbedding
 
@@ -98,3 +103,60 @@ def test_an_icon_sized_standalone_file_is_not_captioned(settings, store):
     captioner = Captioner()
     report = ingestor(settings, store, captioner).ingest_bytes("dot.png", b"\x89PNG\r\n\x1a\n" + b"x" * 10)
     assert captioner.calls == 0 and report.images_skipped == 1
+
+
+def test_turning_captions_off_makes_no_llm_call(settings, store):
+    captioner = Captioner()
+    report = ingestor(settings, store, captioner).ingest_bytes("board.png", PICTURE, captions=False)
+    assert captioner.calls == 0 and report.images_skipped == 1 and report.chunks == 0
+
+
+def test_an_unchanged_document_gets_no_caption_while_captions_are_off(settings, store):
+    captioner = Captioner()
+    run = ingestor(settings, store, captioner)
+    run.ingest_bytes("board.png", PICTURE, captions=False)
+    assert run.ingest_bytes("board.png", PICTURE, captions=False).images_captioned == 0
+    assert captioner.calls == 0
+    assert run.ingest_bytes("board.png", PICTURE, captions=True).images_captioned == 1
+
+
+def test_a_stored_caption_is_free_even_with_captions_off(settings, store):
+    captioner = Captioner()
+    run = ingestor(settings, store, captioner)
+    run.ingest_bytes("board.png", PICTURE)
+    report = run.ingest_bytes("copy.png", PICTURE, captions=False)
+    assert captioner.calls == 1 and report.chunks == 1
+
+
+def _api(settings, captioner):
+    def build(cfg, log, cache):
+        opened = IndexStore(cfg.index_dir, HashEmbedding())
+        run = Ingestor(cfg, opened, cfg.index_dir, cache, captioner)
+        retriever = HybridRetriever(opened, cfg)
+        deps = Deps(cfg, FakeGateway(), retriever, cache, log, lambda: "ns")
+        return Services(deps, opened, run, retriever)
+
+    return TestClient(create_app(settings, services_factory=build))
+
+
+def test_an_api_upload_does_not_caption_by_default(settings):
+    captioner = Captioner()
+    with _api(settings, captioner) as client:
+        body = client.post("/v1/documents", files=[("files", ("board.png", PICTURE))]).json()
+    assert captioner.calls == 0 and body[0]["caption_requests"] == 0 and body[0]["images_skipped"] == 1
+
+
+def test_an_api_upload_captions_when_asked(settings):
+    captioner = Captioner()
+    with _api(settings, captioner) as client:
+        files = [("files", ("board.png", PICTURE))]
+        body = client.post("/v1/documents", files=files, data={"captions": "true"}).json()
+    assert captioner.calls == 1 and body[0]["images_captioned"] == 1
+
+
+def test_a_stuck_caption_still_lets_the_upload_finish(settings):
+    captioner = Captioner(LLMUnavailableError("timed out"))
+    with _api(settings, captioner) as client:
+        files = [("files", ("board.png", PICTURE))]
+        response = client.post("/v1/documents", files=files, data={"captions": "true"})
+    assert response.status_code == 200 and response.json()[0]["status"] == "ingested"
