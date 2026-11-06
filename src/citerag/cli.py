@@ -1,4 +1,4 @@
-"""Command line entry point. More commands arrive with their milestones (eval in M4, cache in M6)."""
+"""Command line entry point."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 app = typer.Typer(no_args_is_help=True)
 eval_app = typer.Typer(no_args_is_help=True, help="Measure retrieval and answers.")
 app.add_typer(eval_app, name="eval")
+cache_app = typer.Typer(no_args_is_help=True, help="Inspect or empty the semantic cache.")
+app.add_typer(cache_app, name="cache")
 
 
 @app.callback()
@@ -301,6 +303,119 @@ def eval_gate(run_id: str) -> None:
             f"Proposal: {best.tau:.2f}, the highest with no false refusal. It stops "
             f"{best.gate_refusals} of {len(unanswerable)} unanswerable items. Set MIN_TOP_SIMILARITY yourself."
         )
+
+
+@cache_app.command("stats")
+def cache_stats() -> None:
+    """Entries and backend. Reads the file, so it works with the API stopped."""
+    from citerag.cache.store import open_cache
+
+    stats = open_cache(get_settings()).stats()
+    typer.echo(f"backend: {stats.backend}; enabled: {stats.enabled}; entries: {stats.entries}")
+
+
+@cache_app.command("clear")
+def cache_clear() -> None:
+    """Delete every entry. A running API notices on its next lookup; POST /v1/cache/clear does the same at once."""
+    from citerag.cache.store import open_cache
+
+    cache = open_cache(get_settings())
+    cache.clear()
+    typer.echo(f"Cache cleared; entries: {cache.stats().entries}")
+
+
+@eval_app.command("cache-sweep")
+def eval_cache_sweep(
+    pairs: Annotated[Path, typer.Option(help="JSONL of labelled pairs")] = Path("eval/cache_pairs.jsonl"),
+    max_false_hit_rate: Annotated[float, typer.Option(help="Cap on the false-hit rate")] = 0.02,
+    chart: Annotated[Path, typer.Option(help="Where the chart goes")] = Path("docs/results/e5_threshold.png"),
+) -> None:
+    """E5: precision, recall and false-hit rate per threshold, on labelled pairs only. Zero LLM requests.
+    Prints a recommendation and changes nothing."""
+    from citerag.eval.cache_tools import load_pairs, save_sweep, sweep_pairs
+
+    settings = get_settings()
+    try:
+        found = load_pairs(pairs)
+        if not any(pair.labelled for pair in found):
+            sweep_pairs(found, _no_embedding)  # says there are no labelled pairs
+        from citerag.analytics.plots import threshold_chart
+        from citerag.index.store import make_embedder
+
+        result = sweep_pairs(found, make_embedder(settings).get_query_embedding, max_false_hit_rate)
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+    save_sweep(result)
+    chart.parent.mkdir(parents=True, exist_ok=True)
+    threshold_chart(result).savefig(chart, dpi=150)
+    typer.echo(f"Labelled pairs: {result.n_equivalent} equivalent, {result.n_near_miss} near miss")
+    if not result.enough_pairs:
+        typer.echo("PROVISIONAL: F-CAC-8 needs at least 30 of each")
+    if result.recommended is None:
+        typer.echo("No threshold is both safe and useful: improve the guard or the embedding first.")
+    else:
+        row = next(r for r in result.rows if r.tau == result.recommended)
+        typer.echo(
+            f"Recommended CACHE_THRESHOLD: {result.recommended:.2f} (false-hit rate {row.false_hit_rate:.1%}, "
+            f"recall {row.recall:.1%}, precision {row.precision:.1%}). Nothing was changed."
+        )
+    for pair in result.worst_near_misses[:5]:
+        guard = "guard passes" if pair.guard_ok else "guard blocks"
+        typer.echo(f"  {pair.id} {pair.similarity:.3f} ({pair.kind}, {guard})")
+    typer.echo(f"Chart: {chart}")
+
+
+def _no_embedding(text: str) -> list[float]:
+    raise AssertionError(text)  # sweep_pairs stops before embedding when nothing is labelled
+
+
+@eval_app.command("bench-cache")
+def eval_bench_cache(
+    workload: Annotated[Path, typer.Option(help="JSONL of workload items")] = Path("eval/workload.jsonl"),
+    index_dir: Annotated[Path | None, typer.Option(help="Default: DATA_DIR/index")] = None,
+    max_requests: Annotated[int | None, typer.Option(help="Pause before this many LLM requests")] = None,
+    resume: Annotated[str | None, typer.Option(help="Continue this run id")] = None,
+    skip_judge: Annotated[bool, typer.Option(help="No verdicts now; --resume adds them later")] = False,
+    estimate: Annotated[bool, typer.Option(help="Print the request estimate and stop")] = False,
+    report: Annotated[Path, typer.Option(help="Written when both passes finish")] = Path(
+        "docs/results/E6_cache_benchmark.md"
+    ),
+) -> None:
+    """E6: replay a workload with the cache off, then on. Uses LLM requests; --estimate uses none."""
+    from citerag.eval.bench import estimate_requests, load_workload, render_report
+
+    settings = get_settings()
+    target = index_dir or settings.index_dir
+    try:
+        items = load_workload(workload)
+        expected, worst = estimate_requests(items, skip_judge)
+        typer.echo(f"{len(items)} questions: about {expected} LLM requests, {worst} at worst")
+        if estimate:
+            return
+        from citerag.eval.execute import execute_bench
+
+        _check_index(target, settings)
+        summary = execute_bench(settings, workload, items, target, max_requests, resume, skip_judge)
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+
+    off, on = summary.passes["off"], summary.passes["on"]
+    typer.echo(f"Run {summary.run_id}: {summary.status}{f' ({summary.reason})' if summary.reason else ''}")
+    typer.echo(f"Off: {off.n_done} of {off.n_items}, {off.llm_requests} LLM requests")
+    typer.echo(f"On: {on.n_done} of {on.n_items}, {on.llm_requests} LLM requests, {on.hits} hits")
+    typer.echo(f"LLM requests this call: {summary.requests_used}")
+    if summary.status != "complete":
+        typer.echo(f"Continue with --resume {summary.run_id}")
+    elif on.n_done == on.n_items:
+        from citerag.analytics.plots import bench_chart
+
+        chart = report.with_name("e6_cache.png")
+        chart.parent.mkdir(parents=True, exist_ok=True)
+        bench_chart(summary).savefig(chart, dpi=150)
+        report.write_text(render_report(summary, chart.name), encoding="utf-8")
+        typer.echo(f"Report: {report}")
 
 
 @eval_app.command("parts")
