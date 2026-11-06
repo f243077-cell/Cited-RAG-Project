@@ -74,7 +74,9 @@ class Ingestor:
         captioner: Captioner | None = None,
     ) -> None:
         self._settings, self._store, self._index_dir = settings, store, index_dir
-        self._cache = cache or NoOpCache()
+        self._cache = (
+            NoOpCache() if cache is None else cache
+        )  # an empty cache has len 0, so `or` would drop it
         self._uploads = settings.data_dir / "uploads"
         self._captioner = captioner
         self._images = ImageStore(settings.data_dir)

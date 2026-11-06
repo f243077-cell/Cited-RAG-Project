@@ -1,4 +1,4 @@
-"""Cache interface, plus the no-op backend the pipeline uses until the real cache plugs in at M6 (F-CAC-10)."""
+"""Cache interface, plus the no-op backend used when the cache is off or its file is unusable (F-CAC-10)."""
 
 from __future__ import annotations
 
@@ -33,6 +33,10 @@ class CacheBackend(Protocol):
         now: float | None = None,
     ) -> None: ...
 
+    def best_similarity(
+        self, q_emb: np.ndarray, namespace: str, mode: str = "standard", now: float | None = None
+    ) -> float | None: ...
+
     def invalidate_except(self, namespace: str) -> int: ...
 
     def clear(self) -> None: ...
@@ -58,6 +62,11 @@ class NoOpCache:
         cost_usd: float = 0.0,
         now: float | None = None,
     ) -> None:
+        return None
+
+    def best_similarity(
+        self, q_emb: np.ndarray, namespace: str, mode: str = "standard", now: float | None = None
+    ) -> float | None:
         return None
 
     def invalidate_except(self, namespace: str) -> int:

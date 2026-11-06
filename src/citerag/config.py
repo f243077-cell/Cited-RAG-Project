@@ -89,6 +89,10 @@ class Settings(BaseSettings):
         return self.data_dir / "index"
 
     @property
+    def cache_db_path(self) -> Path:
+        return self.data_dir / "cache" / "semantic_cache.sqlite"
+
+    @property
     def logs_db_path(self) -> Path:
         return self.data_dir / "logs" / "app.sqlite"
 
