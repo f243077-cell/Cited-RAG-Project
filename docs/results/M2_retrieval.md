@@ -88,9 +88,11 @@ Ideas to test at M4 on the verified set, none tested yet: a BM25 token pattern t
 uv run python scripts/audit_gold_pages.py --index-dir data/index_eval
 ```
 
-The script lists pages in a gold document that share the gold answer's key terms but are not in `gold_sources`. It lists 51 pages across 13 items for human review. No gold source was changed from this list; a listed page may only mention the terms.
+The script lists pages in a gold document that share the gold answer's key terms but are not in `gold_sources`. It first listed 51 pages across 13 items for human review. After that review, 9 of those pages were added to the gold sources: `a-001` p5, p8, p39; `a-015` p31; `a-016` p7, p8, p10, p19, p20. The script now lists 42 pages across 13 items. A listed page may only mention the terms.
 
-Tested by dropping each gold page in turn, on items with two or more gold pages: it listed 23 of 27 again. The 4 misses are all `multi_chunk` items (`m-001` three times, `m-003` once), because a whole-answer term match is weak when each page holds only part of the answer. A short list for those items does not prove their pages are complete.
+The added pages changed no retrieval score, because all three items already ranked 1 on a gold page.
+
+Tested by dropping each gold page in turn, on items with two or more gold pages: it listed 34 of 38 again. The 4 misses are all `multi_chunk` items (`m-001` three times, `m-003` once), because a whole-answer term match is weak when each page holds only part of the answer. A short list for those items does not prove their pages are complete.
 
 ## Relevance gate
 
