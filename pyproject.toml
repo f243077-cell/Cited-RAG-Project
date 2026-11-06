@@ -50,6 +50,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/citerag"]
 
+[tool.uv]
+# nltk refuses hard-linked data files (CWE-59), and uv hard-links by default when the cache is on the same drive
+link-mode = "copy"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
