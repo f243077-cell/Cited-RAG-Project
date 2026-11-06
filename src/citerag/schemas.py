@@ -190,6 +190,9 @@ class JudgeVerdict(BaseModel):
 class GoldenSource(BaseModel):
     doc: str
     page: int | None = None  # None = any page of that document
+    # Sources with the same `part` are alternatives (any one satisfies the part). A multi_chunk item is fully
+    # covered only when every distinct part is retrieved. Default 0 keeps single-part items unchanged.
+    part: int = 0
 
 
 class GoldenItem(BaseModel):
@@ -201,3 +204,104 @@ class GoldenItem(BaseModel):
     image_path: str | None = None
     canary: str | None = None  # injection items: this string must NOT appear in the answer
     verified: bool = False  # a human checked question, answer and sources
+
+
+class ItemRecord(BaseModel):
+    """One golden item in a run, kept so a run can resume and verdicts can be added later."""
+
+    id: str
+    type: str
+    question: str
+    gold_answer: str | None = None
+    gold_sources: list[GoldenSource] = Field(default_factory=list)
+    canary: str | None = None
+    status: Literal["answered", "error"]
+    error_code: str | None = None
+    answer: CitedAnswer | None = None
+    context: str = ""  # the rendered passages: the judge sees what the generator saw (F-EVA-3)
+    retrieved: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    usage: UsageInfo | None = None
+    verdict: JudgeVerdict | None = None
+    judge_error: str | None = None
+    judge_requests: int = 0
+
+
+class Rate(BaseModel):
+    n: int
+    of: int
+    rate: float | None = None  # None when nothing was measured
+
+
+class AnswerSummary(BaseModel):
+    faithfulness: Rate
+    correctness: Rate
+    correct_or_partial: Rate
+    citation_validity: Rate
+    citation_precision: Rate
+    correct_refusal: Rate
+    false_refusal: Rate
+    injection_leaks: int
+    injection_items: int
+    pending_judge: int
+    errors: int
+    latency_p50_ms: float | None = None
+    latency_p95_ms: float | None = None
+    mean_input_tokens: float | None = None
+    mean_output_tokens: float | None = None
+    mean_llm_requests: float | None = None
+    mean_shadow_usd: float | None = None
+
+
+class RetrievalScores(BaseModel):
+    n_scored: int
+    ks: list[int]
+    hits: dict[int, int]
+    hit_rate: dict[int, float]
+    mrr_k: int
+    mrr: float
+    n_multi_chunk: int = 0
+    full_coverage: dict[int, int] = Field(
+        default_factory=dict
+    )  # multi_chunk items with every part in the top k
+
+
+class RunSummary(BaseModel):
+    run_id: str
+    status: Literal["offline", "complete", "paused", "stopped"]
+    reason: str | None = None
+    experiment: str | None = None
+    golden: str
+    n_items: int
+    n_done: int = 0
+    unverified_items: int
+    requests_used: int = 0
+    before_rerank: RetrievalScores | None = None
+    after_rerank: RetrievalScores | None = None
+    answerable_cosines: list[float] = Field(default_factory=list)
+    unanswerable_cosines: list[float] = Field(default_factory=list)
+    answers: AnswerSummary | None = None
+
+    def headline(self) -> dict[str, float | None]:
+        """Shares from 0 to 1, for compare tables and charts."""
+        found: dict[str, float | None] = {}
+        for prefix, scores in (("", self.before_rerank), ("rerank ", self.after_rerank)):
+            if scores is not None and scores.n_scored:  # no scored item is no measurement, not 0%
+                found |= {f"{prefix}hit@{k}": scores.hit_rate[k] for k in scores.ks}
+                found[f"{prefix}MRR@{scores.mrr_k}"] = scores.mrr
+                for (
+                    k,
+                    n,
+                ) in scores.full_coverage.items():  # the headline for multi_chunk: hit@k needs one part only
+                    found[f"{prefix}multi_chunk full_coverage@{k}"] = n / scores.n_multi_chunk
+        if self.answers is not None:
+            for name in AnswerSummary.model_fields:
+                value = getattr(self.answers, name)
+                if isinstance(value, Rate):
+                    found[name] = value.rate
+        return found
+
+
+class RunDetail(BaseModel):
+    summary: RunSummary
+    items: list[ItemRecord]

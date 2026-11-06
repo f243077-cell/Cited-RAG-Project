@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel
 
-from citerag.eval.metrics import hit_at_k, is_hit, reciprocal_rank
+from citerag.eval.metrics import full_coverage_at_k, hit_at_k, is_hit, reciprocal_rank
 from citerag.rag.context import Chunk
 from citerag.schemas import GoldenItem, GoldenSource
 
@@ -19,6 +19,7 @@ class ItemResult(BaseModel):
     type: str
     scored: bool
     first_hit_rank: int | None
+    all_parts_by_rank: int | None = None  # multi_chunk: rank where the last gold part appears
     top_cosine: float
     top_sources: list[str]
 
@@ -31,12 +32,14 @@ class RetrievalReport(BaseModel):
     hits: dict[int, int]
     hit_rate: dict[int, float]
     mrr: float
+    n_multi_chunk: int = 0
+    full_coverage: dict[int, int] = {}
     answerable_cosines: list[float]
     unanswerable_cosines: list[float]
     items: list[ItemResult]
 
 
-def _label(chunk: Chunk) -> str:
+def label(chunk: Chunk) -> str:
     return chunk.doc_name if chunk.page is None else f"{chunk.doc_name} p{chunk.page}"
 
 
@@ -51,7 +54,7 @@ def first_gold_rank(chunks: list[Chunk], gold: list[GoldenSource]) -> int | None
 def rank_line(name: str, chunks: list[Chunk], gold: list[GoldenSource], show: int = 3) -> str:
     rank = first_gold_rank(chunks, gold)
     found = f"not found in {len(chunks)}" if rank is None else f"rank {rank} of {len(chunks)}"
-    return f"{name}: {found}, top: {[_label(c) for c in chunks[:show]]}"
+    return f"{name}: {found}, top: {[label(c) for c in chunks[:show]]}"
 
 
 def score_retrieval(
@@ -63,10 +66,20 @@ def score_retrieval(
 ) -> RetrievalReport:
     results: list[ItemResult] = []
     hits = dict.fromkeys(ks, 0)
+    covered = dict.fromkeys(ks, 0)
+    n_multi_chunk = 0
     reciprocal_sum = 0.0
     for item in items:
         chunks = rank(item.question)
         relevance = [is_hit(c.doc_name, c.page, item.gold_sources) for c in chunks]
+        found = [(c.doc_name, c.page) for c in chunks]
+        all_parts = None
+        if item.type == "multi_chunk":
+            n_multi_chunk += 1
+            for k in ks:
+                covered[k] += int(full_coverage_at_k(found, item.gold_sources, k))
+            ranks = range(1, len(found) + 1)
+            all_parts = next((r for r in ranks if full_coverage_at_k(found, item.gold_sources, r)), None)
         scored = item.type in SCORED_TYPES
         if scored:
             for k in ks:
@@ -79,8 +92,9 @@ def score_retrieval(
                 type=item.type,
                 scored=scored,
                 first_hit_rank=relevance.index(True) + 1 if True in relevance else None,
+                all_parts_by_rank=all_parts,
                 top_cosine=top_cosine(item.question),
-                top_sources=[_label(c) for c in chunks[:5]],
+                top_sources=[label(c) for c in chunks[:5]],
             )
         )
     n_scored = sum(r.scored for r in results)
@@ -92,6 +106,8 @@ def score_retrieval(
         hits=hits,
         hit_rate={k: hits[k] / n_scored if n_scored else 0.0 for k in ks},
         mrr=reciprocal_sum / n_scored if n_scored else 0.0,
+        n_multi_chunk=n_multi_chunk,
+        full_coverage=covered if n_multi_chunk else {},
         answerable_cosines=[r.top_cosine for r in results if r.scored],
         unanswerable_cosines=[r.top_cosine for r in results if r.type == "unanswerable"],
         items=results,

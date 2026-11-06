@@ -4,9 +4,12 @@ from pydantic import ValidationError
 
 from citerag.cache.semantic_cache import SemanticCache, guard_ok
 from citerag.eval.metrics import (
+    coverage_at_k,
     estimate_cost_usd,
+    full_coverage_at_k,
     hit_at_k,
     is_hit,
+    parts_covered,
     percentile,
     pick_threshold,
     reciprocal_rank,
@@ -287,3 +290,27 @@ def test_agent_schemas_and_hash_embedding():
         for t in ("refund within 30 days", "refund in 30 days", "shipping takes long")
     )
     assert a @ b > a @ c
+
+
+def test_multi_part_coverage():
+    gold = [
+        GoldenSource(doc="a.pdf", page=5, part=0),
+        GoldenSource(doc="a.pdf", page=25, part=0),  # alternative for part 0
+        GoldenSource(doc="b.pdf", page=8, part=1),
+    ]
+    both = [("a.pdf", 25), ("x.pdf", 1), ("b.pdf", 8)]
+    only_first = [("a.pdf", 5), ("x.pdf", 1)]
+    assert parts_covered(both, gold, 3) == {0: True, 1: True}
+    assert full_coverage_at_k(both, gold, 3) == 1.0
+    assert full_coverage_at_k(both, gold, 2) == 0.0  # the second part sits at rank 3
+    assert coverage_at_k(both, gold, 2) == 0.5
+    assert full_coverage_at_k(only_first, gold, 5) == 0.0
+    assert coverage_at_k(only_first, gold, 5) == 0.5
+    assert coverage_at_k([], gold, 5) == 0.0
+
+
+def test_single_part_coverage_equals_hit_at_k():
+    gold = [GoldenSource(doc="a.pdf", page=3)]  # default part 0
+    rel = [("x.pdf", 1), ("a.pdf", 3)]
+    assert coverage_at_k(rel, gold, 2) == hit_at_k([is_hit(d, p, gold) for d, p in rel], 2)
+    assert coverage_at_k(rel, gold, 1) == 0.0

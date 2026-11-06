@@ -18,6 +18,29 @@ def hit_at_k(relevance: list[bool], k: int) -> float:
     return float(any(relevance[:k]))
 
 
+def parts_covered(
+    retrieved: list[tuple[str, int | None]], gold: list[GoldenSource], k: int
+) -> dict[int, bool]:
+    """retrieved = [(doc, page), ...] in rank order. Returns {part: True if any top-k chunk matches a source of that part}."""
+    top = retrieved[:k]
+    parts: dict[int, bool] = {}
+    for g in gold:
+        parts[g.part] = parts.get(g.part, False) or any(is_hit(d, p, [g]) for d, p in top)
+    return parts
+
+
+def coverage_at_k(retrieved: list[tuple[str, int | None]], gold: list[GoldenSource], k: int) -> float:
+    """Share of gold parts found in the top k (0.0 to 1.0). With one part this equals hit@k."""
+    covered = parts_covered(retrieved, gold, k)
+    return sum(covered.values()) / len(covered) if covered else 0.0
+
+
+def full_coverage_at_k(retrieved: list[tuple[str, int | None]], gold: list[GoldenSource], k: int) -> float:
+    """1.0 only if EVERY gold part is found in the top k. The headline metric for multi_chunk items."""
+    covered = parts_covered(retrieved, gold, k)
+    return float(bool(covered) and all(covered.values()))
+
+
 def reciprocal_rank(relevance: list[bool], k: int) -> float:
     for i, rel in enumerate(relevance[:k], start=1):
         if rel:
