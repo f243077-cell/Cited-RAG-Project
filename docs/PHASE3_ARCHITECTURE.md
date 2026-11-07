@@ -25,7 +25,7 @@ Checked on 2026-11-07 against the installed packages and OpenRouter's public mod
 src/citerag/
 ├─ tools/          framework-free: contracts.py (Pydantic args and results), library.py (list, search, read_page), render.py
 ├─ agent_graph/    the only place that imports langgraph: state.py, nodes.py, graph.py, routing.py, supervisor.py (M12)
-├─ mcp/            the only place that imports the MCP SDK: server.py (FastMCP over stdio), backend.py (HTTP or local tools)
+├─ mcp_server/            the only place that imports the MCP SDK: server.py (FastMCP over stdio), backend.py (HTTP or local tools)
 ├─ llm/gateway.py  + tool_step(): native tool calling, with the JSON action fallback (LangChain stays in llm/)
 ├─ api/routers/    + tools.py: POST /v1/tools/{name}, read-only (decision 1)
 ├─ prompts/        + agent_plan.md, agent_act.md, agent_reflect.md (synthesis reuses answer.md)
@@ -37,11 +37,11 @@ src/citerag/
 | Framework | Owns | Lives in | Must not |
 |---|---|---|---|
 | **LangGraph** | The agent `StateGraph`, routing, recursion limit, the M12 supervisor | `agent_graph/` | Call a model itself or build a LangChain client; return graph or LangChain objects; run in the standard or Deep path |
-| **MCP SDK** | The stdio server and its tool registration; the in-process test client | `mcp/` | Hold tool logic (it calls `tools/`); open any transport but stdio; expose prompts or resources |
+| **MCP SDK** | The stdio server and its tool registration; the in-process test client | `mcp_server/` | Hold tool logic (it calls `tools/`); open any transport but stdio; expose prompts or resources |
 | **Tools** (no framework) | Argument validation, retrieval calls, caps, rendering | `tools/` | Import LangChain, LangGraph, LlamaIndex types, CrewAI or the MCP SDK |
 
 `langgraph` and `mcp` were already importable before Phase 3, as transitive dependencies. A boundary test (as for CrewAI in M7)
-fails if `langgraph` is imported outside `agent_graph/` or `mcp` outside `mcp/`.
+fails if `langgraph` is imported outside `agent_graph/` or `mcp` outside `mcp_server/`.
 
 ## 3. The agent graph
 
@@ -107,7 +107,7 @@ class SearchArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=1, max_length=500)
     doc_ids: list[str] | None = Field(default=None, max_length=20)
-    k: int = Field(default=5, ge=1, le=10)            # le is AGENT_TOOL_MAX_K
+    k: int = Field(default=5, ge=1, le=10)            # fixed in the contract, so MCP clients see the same bound
 
 class ReadPageArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -130,6 +130,7 @@ class ToolResult(BaseModel):
     tool: Literal["list_documents", "search_documents", "read_page"]
     ok: bool
     error: str | None = None                           # a typed message, F-TOOL-6; never a stack trace
+    message: str = ""                                  # written by code, e.g. "no relevant passages"
     hits: list[ToolHit] = []
     documents: list[DocumentInfo] = []                 # list_documents only; existing schema
     top_similarity: float | None = None                # search only: the gate value
@@ -214,8 +215,6 @@ with `ok=false`, which the next `act` step sees. It is never retried silently.
 | `AGENT_MAX_STEPS` | `6` | LLM calls of plan, act and reflect; synthesis is outside it |
 | `AGENT_RECURSION_LIMIT` | `25` | LangGraph backstop |
 | `AGENT_TIMEOUT_S` | `240` | Whole agent request |
-| `AGENT_TOOL_K` | `5` | Default `k` |
-| `AGENT_TOOL_MAX_K` | `10` | Upper bound on `k` |
 | `AGENT_TOOL_RESULT_CHARS` | `6000` | Per tool call |
 | `AGENT_CONTEXT_MAX_PASSAGES` | `8` | Passed to `build_context` at synthesis |
 | `AGENT_ACTION_METHOD` | `auto` | `auto`, `tools` or `json` |
@@ -291,7 +290,7 @@ items, does the extra coordination buy coverage or correctness worth its request
 | Integration: API | `mode="agent"` returns a trace; image with agent is 400; `AGENT_ENABLED=false` is 400; `/v1/tools/*` validation errors are 400 with `ErrorResponse` | none |
 | Integration: MCP | In-process client: 3 tools listed with schemas, each called, bad arguments give `isError`, caps hold; a subprocess `citerag mcp --local` completes `initialize` and `tools/list` over real stdio, with nothing but JSON-RPC on stdout | none |
 | UI (`AppTest`) | Mode selector, cost warning, trace expander with plan, tool calls and requests | none |
-| Boundary | `langgraph` only in `agent_graph/`, `mcp` only in `mcp/`, `tools/` imports no framework | none |
+| Boundary | `langgraph` only in `agent_graph/`, `mcp` only in `mcp_server/`, `tools/` imports no framework | none |
 | Live (`-m live`, on approval) | The section 10 spike; one agent question | at most 11 requests |
 
 ## 14. Architecture decisions
@@ -299,7 +298,7 @@ items, does the extra coordination buy coverage or correctness worth its request
 | # | Decision | Why | Alternatives | Revisit when |
 |---|---|---|---|---|
 | ADR-15 | LangGraph for Agent mode only, in `agent_graph/` | The roadmap asks for it; explicit state and a recursion limit suit a tool loop. The standard path stays plain functions (ADR-10) | Hand-written loop; LangGraph for every mode | The standard path needs loops or tools |
-| ADR-16 | MCP SDK only in `mcp/`, stdio only | Smallest attack surface; the server is a thin adapter over `tools/` | HTTP or SSE transport | A remote client is needed, with auth |
+| ADR-16 | MCP SDK only in `mcp_server/`, stdio only | Smallest attack surface; the server is a thin adapter over `tools/` | HTTP or SSE transport | A remote client is needed, with auth |
 | ADR-17 | Tools are a framework-free package shared by the graph, the API and MCP | One implementation of validation, caps and gating | Tools defined inside LangGraph or MCP | Never |
 | ADR-18 | Agent mode bypasses the cache | The trace and cost are what is being measured; agent answers depend on a search path | Cache the final answer | Agent mode becomes a default |
 | ADR-19 | Own step counter as the real limit; `recursion_limit` only as a backstop | A step counted in LLM calls maps to quota; graph-node visits do not | `recursion_limit` alone | Never |

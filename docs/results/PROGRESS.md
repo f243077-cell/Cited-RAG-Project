@@ -7,7 +7,8 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 | M6 semantic cache | built and pushed; exit criteria need your labels and a live replay |
 | M7 CrewAI | built and pushed; E7 and every live crew run are left unrun |
 | M8 polish | built and pushed; Docker untested; a live first answer not run |
-| Phase 3 (M9 to M12) | planned in `docs/PHASE3_PRD.md` and `docs/PHASE3_ARCHITECTURE.md`; waiting for "Build M9" |
+| Phase 3 M9 tools and MCP | built and pushed; 0 LLM requests |
+| Phase 3 M10 to M12 | in progress (Coder delegated decisions on 2026-11-07: see PHASE3_PRD section 10) |
 
 ## M6
 
@@ -38,3 +39,9 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 5. **Crew requests are counted from outside.** CrewAI does not report failed attempts, and it retries a 429 twice with no setting to stop it. The log therefore overestimates on a failure, which errs towards the stricter guard, and a real run could still differ. Compare `/health` with `GET /api/v1/key` on your first Deep runs.
 6. **Crews parse strictly.** If the first live Deep request fails with `structured_output_failed` on nemotron, the choice is another model for `MODEL_FAST` and `MODEL_STRONG`, or a parsing layer over CrewAI.
 7. **Security gaps are listed for you to accept or close.** See the Gaps section of `security_checklist.md`: no API rate limit, uploads and chat bodies are read before they are rejected, `/health` needs no key, the container runs as root, and a timed-out crew keeps running until its agents' limit.
+
+## Phase 3: M9
+
+**Done:** `tools/` (three read-only tools, contracts, caps, gate, filter), `POST /v1/tools/{name}`, `mcp_server/` with
+`citerag mcp` over stdio (HTTP backend by default, `--local`), a boundary test for LangGraph, MCP and CrewAI, `M9_test_guide.md`.
+A real stdio subprocess test proves stdout carries only JSON-RPC.

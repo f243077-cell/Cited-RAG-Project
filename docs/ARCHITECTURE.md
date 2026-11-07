@@ -36,7 +36,7 @@ CiteRAG is two Python processes sharing a local data folder: a **FastAPI backend
 | **Pydantic** | Every boundary contract and all settings | `schemas.py`, `config.py`, `agents/schemas.py` | Be bypassed with raw dicts |
 | **NumPy / Pandas / Matplotlib** | Cache similarity, metrics, log analysis, charts | `cache/`, `eval/`, `analytics/` | Appear inside request handlers beyond the cache lookup |
 | **LangGraph** (Phase 3, from M9) | The Agent-mode graph and the M12 supervisor | `agent_graph/` | Call a model itself; run in the standard or Deep path (ADR-15) |
-| **MCP SDK** (Phase 3, from M9) | The stdio server over the read-only tools | `mcp/` | Hold tool logic; use any transport but stdio (ADR-16) |
+| **MCP SDK** (Phase 3, from M9) | The stdio server over the read-only tools | `mcp_server/` | Hold tool logic; use any transport but stdio (ADR-16) |
 
 Phase 3 adds these two rows and a framework-free `tools/` package; the design is in `docs/PHASE3_ARCHITECTURE.md`.
 

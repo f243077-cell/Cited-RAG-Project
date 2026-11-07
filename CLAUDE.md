@@ -52,6 +52,7 @@ uv run citerag eval compare <run_a> <run_b>   # delta table; under 3 points is n
 uv run citerag eval gate <run_id>   # MIN_TOP_SIMILARITY sweep; a proposal, it changes nothing
 uv run citerag eval parts --index-dir data/index_eval   # multi_chunk: hybrid rank of each gold part, zero LLM requests
 uv run citerag ingest data/sample --config configs/experiments/e1_chunk_256.yaml   # build an experiment index
+uv run citerag mcp                        # MCP server over stdio; calls the running API (add --local with the API stopped)
 uv run citerag quota                      # requests in the last 24 hours against each guard, zero LLM requests
 uv run citerag logs purge --days 30       # delete old log rows
 docker compose config                     # checks the compose file; the images are untested (M8)
@@ -88,7 +89,7 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 ## Architecture rules (enforced; see ARCHITECTURE sections 2 and 20)
 
 1. **Framework boundaries.** LlamaIndex only in `ingest/` and `index/`. LangChain only in `llm/`. CrewAI only in `agents/`.
-   From M9 (ADR-15, ADR-16): LangGraph only in `agent_graph/`, the MCP SDK only in `mcp/`, and `tools/` imports no framework.
+   From M9 (ADR-15, ADR-16): LangGraph only in `agent_graph/`, the MCP SDK only in `mcp_server/`, and `tools/` imports no framework.
    Both packages were already importable as transitive dependencies, so a test enforces this, as it does for CrewAI.
    Framework objects (`Node`, `NodeWithScore`, `AIMessage`, crew and graph objects) never cross a boundary: convert to `Chunk`,
    Pydantic models or plain values.

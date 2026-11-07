@@ -48,7 +48,7 @@ evaluation), F-SUP (supervisor), F-DEV (AI-assisted development), NF-P3.
 - **F-TOOL-1 [MUST]** Three tools: `list_documents()`, `search_documents(query, doc_ids?, k)` and `read_page(doc, page)`. They live
   in a framework-free `tools/` package and reuse the existing retriever, docstore and manifest.
 - **F-TOOL-2 [MUST]** Every argument is validated by a Pydantic model with `extra="forbid"`, bounded strings and numbers. `k` is
-  1 to `AGENT_TOOL_MAX_K` (default 10), a query is 1 to 500 characters, and `page` is at least 1.
+  1 to 10 (default 5), a query is 1 to 500 characters, and `page` is at least 1.
 - **F-TOOL-3 [MUST]** Results are capped: at most `k` hits, and at most `AGENT_TOOL_RESULT_CHARS` characters per call (default
   6000). Text that reaches a model is rendered with `render_passages`, so documents stay escaped, untrusted data.
 - **F-TOOL-4 [MUST]** `search_documents` applies the relevance gate: below `MIN_TOP_SIMILARITY` it returns "no relevant passages"
@@ -124,7 +124,7 @@ evaluation), F-SUP (supervisor), F-DEV (AI-assisted development), NF-P3.
 
 | ID | Requirement |
 |---|---|
-| NF-P3-1 | **Framework boundaries:** LangGraph only in `agent_graph/`, the MCP SDK only in `mcp/`, tools framework-free in `tools/`. A test enforces it, as it does for CrewAI |
+| NF-P3-1 | **Framework boundaries:** LangGraph only in `agent_graph/`, the MCP SDK only in `mcp_server/`, tools framework-free in `tools/`. A test enforces it, as it does for CrewAI |
 | NF-P3-2 | **Quota:** typical agent question 4 LLM requests, 6 with one more search round, at most 8 (9 for a follow-up). Each failed HTTP attempt adds to that, and the guard counts it |
 | NF-P3-3 | **Latency:** agent p50 at most 3 times standard p50 on E8. Record the real figure, as M3 did for standard |
 | NF-P3-4 | **Testability:** the default `pytest` makes no network call. The graph runs on `FakeGateway`, MCP on the in-process client, and native tool calls on the fake OpenAI server |
@@ -138,7 +138,7 @@ listed separately and run only on the owner's go.
 
 | # | Milestone | Deliverables | Exit criteria | Live requests |
 |---|---|---|---|---|
-| **M9** | Tools and MCP server | `tools/`, `/v1/tools/*` endpoints (decision 1), `mcp/` with `citerag mcp`, boundary test, M9 test guide | In-process client lists 3 tools and calls each; bad arguments give `isError`; caps hold; a subprocess completes `initialize` and `tools/list` over stdio; `pytest` and `ruff` pass | 0 |
+| **M9** | Tools and MCP server | `tools/`, `/v1/tools/*` endpoints (decision 1), `mcp_server/` with `citerag mcp`, boundary test, M9 test guide | In-process client lists 3 tools and calls each; bad arguments give `isError`; caps hold; a subprocess completes `initialize` and `tools/list` over stdio; `pytest` and `ruff` pass | 0 |
 | **M10** | Agent graph and Agent mode | `agent_graph/`, gateway `tool_step` plus JSON fallback, prompts, config keys, API and Chat mode with trace, M10 test guide | End to end on `FakeGateway` and the fake server: plan, act, reflect, synthesize; step and recursion limits stop the graph; guard refusal before any call; trace matches `llm_calls` rows; canaries escaped | Spike of at most 3 requests plus 1 agent question (at most 8), on approval |
 | **M11** | Evaluation E8 | `e8_*.yaml`, context coverage, N-run compare, E8 report writer, M11 test guide | A fake rehearsal produces the full E8 table; the estimate prints with no request; live run deferred until the golden set is verified | E8 itself, on approval (section 9) |
 | **M12** | Optional: supervisor, comparison, AI-assisted development | `agent_graph/supervisor.py`, comparison report, `docs/AI_ASSISTED_DEV.md`, M12 test guide | Supervisor passes the same fake tests as the agent; the comparison command and estimate run; the dev log covers M0 to M11 | Comparison, on approval |
@@ -182,29 +182,28 @@ If the E7 standard and Deep runs used the same verified set and settings, E8 add
 30-a-day cap that is about 8 days for the agent run, or about 15 for all three. With credits (OPEN-5, 1,000 a day) it fits in one
 day. A sample with `--limit 10` costs about 120 for all three modes.
 
-## 10. Decisions for Coder
+## 10. Decisions
 
-Approved already: `langgraph` and `mcp` as direct dependencies, `ChatRequest.mode="agent"`, `ChatResponse.trace`.
+Approved by Coder: `langgraph` and `mcp` as direct dependencies, `ChatRequest.mode="agent"`, `ChatResponse.trace`. On 2026-11-07
+Coder delegated the remaining decisions; each is taken below, with its reason.
 
-1. **Tool contracts and endpoints.** New public models `ListDocumentsArgs`, `SearchArgs`, `ReadPageArgs`, `ToolHit` and `ToolResult`
-   (PHASE3_ARCHITECTURE section 5), and new read-only endpoints `POST /v1/tools/{name}` so the MCP server need not open Chroma.
-   Default: approve both. Alternative: MCP `--local` only, with the API stopped.
-2. **Package name `mcp/`.** `citerag/mcp/` and the SDK's top-level `mcp` coexist under absolute imports, but a script run from
-   inside `src/citerag` would shadow the SDK. Default: keep `mcp/` as you asked. Alternative: `mcp_server/`.
-3. **No images in Agent mode in v1.** An image adds a vision call and a second retrieval query to every plan. Default: 400 with a
-   clear message.
-4. **Agent mode skips the cache**, like Deep mode. A cached agent answer would hide the trace and the cost being measured.
-5. **New config keys** (PHASE3_ARCHITECTURE section 8): `AGENT_ENABLED`, `AGENT_MAX_SUBQUESTIONS`, `AGENT_MAX_STEPS`,
-   `AGENT_RECURSION_LIMIT`, `AGENT_TIMEOUT_S`, `AGENT_TOOL_K`, `AGENT_TOOL_MAX_K`, `AGENT_TOOL_RESULT_CHARS`,
-   `AGENT_CONTEXT_MAX_PASSAGES`, `AGENT_ACTION_METHOD`, `MCP_MODE`.
-6. **Tool-calling model:** `nvidia/nemotron-3.5-super-vl:free`, the model every role uses now. OpenRouter's public list
-   (2026-11-07, `scripts/pick_free_models.py`, no LLM request) marks it with tools, structured outputs and `response_format`.
-   Tool calling itself is unverified live. M10 checks it with at most 3 requests (PHASE3_ARCHITECTURE section 10) and falls back
-   to the JSON action if it fails.
-7. **A tool-hijack fixture.** A poisoned document that tells the agent to search for something else would test F-GRF-9 properly.
-   Golden items are yours to create; I can write the fixture text for you to review.
-8. **E8 needs your verified golden set**, and about 216 to 443 requests. Credits (OPEN-5) would turn weeks into a day.
-9. **Judge candidates changed.** The public list now shows `liquid/lfm-2.5-2.6b:free` expiring on 2026-11-13; on 2026-11-06 it
-   showed no expiry. `dots-studio/dots-3-note-preview:free` still expires 2026-12-31, and `liquid/lfm-3-1.7b:free` is new and untested.
-10. **ADR-10 is revisited, not overturned.** The standard path stays plain functions. Only Agent mode and the optional supervisor use
+1. **Tool contracts and `POST /v1/tools/{name}`: adopted.** `ListDocumentsArgs`, `SearchArgs`, `ReadPageArgs`, `ToolHit` and
+   `ToolResult` (PHASE3_ARCHITECTURE section 5) are the public contract. The endpoints let `citerag mcp` use the running API, so
+   Chroma keeps one writer; `--local` is for when the API is stopped.
+2. **Package `mcp_server/`, not `mcp/`.** A package named `mcp` inside `citerag` can shadow the SDK when a script runs from inside
+   the package; a distinct name removes the doubt at no cost.
+3. **No images in Agent mode in v1.** An image adds a vision call and a second query to every plan. An agent request with an image
+   returns 400.
+4. **Agent mode skips the cache**, like Deep mode, because the trace and the cost are what it exists to show.
+5. **Config keys:** `AGENT_ENABLED`, `AGENT_MAX_SUBQUESTIONS`, `AGENT_MAX_STEPS`, `AGENT_RECURSION_LIMIT`, `AGENT_TIMEOUT_S`,
+   `AGENT_TOOL_RESULT_CHARS`, `AGENT_CONTEXT_MAX_PASSAGES`, `AGENT_ACTION_METHOD`, `MCP_MODE`. `k` stays fixed at 1 to 10 in the
+   contract, so MCP clients and the agent see one bound and no extra keys are needed.
+6. **Tool-calling model: `nvidia/nemotron-3.5-super-vl:free`.** OpenRouter's public list (2026-11-07) marks it with tools,
+   structured outputs and `response_format`. It is checked in M10 with at most 3 requests (PHASE3_ARCHITECTURE section 10).
+   `AGENT_ACTION_METHOD=auto` falls back to the JSON action if tool calls fail.
+7. **Tool-hijack fixture: written in M11 as a fixture file only.** Golden items stay the owner's to create and verify.
+8. **E8 waits for the verified golden set.** M11 builds and rehearses it on fakes; the live run is listed with its estimate and cap.
+9. **Judge candidates:** `liquid/lfm-2.5-2.6b:free` now expires on 2026-11-13, so it is no longer the first choice. Recorded as a
+   gotcha; the judge stays the owner's choice.
+10. **ADR-10 is revisited, not overturned.** The standard path stays plain functions; only Agent mode and the supervisor use
     LangGraph.
