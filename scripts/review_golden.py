@@ -7,8 +7,8 @@ Reads the source files, so it needs no index and makes no LLM request. It change
 golden.jsonl with verified: true stays with the human reviewer. A marked sentence is only the best guess, chosen by
 how many answer words it shares. A low count means the page may not state the answer, so read that page closely.
 
-Sentence matching compares terms by their first 5 characters, so 800-61r2 and 800-61r3 look identical there, and a
-marked sentence can name the wrong revision. The term list for unanswerable items matches identifiers whole.
+Sentence matching compares plain words by their first 5 characters (categories/category), but identifiers with a digit stay
+whole, so 800-61r2 and 800-61r3 are different terms. The term list for unanswerable items matches identifiers whole too.
 """
 
 from __future__ import annotations
@@ -48,7 +48,8 @@ class Match:
 
 
 def _stem(word: str) -> str:
-    return word[:STEM]
+    """Identifiers such as 800-61r3 or PS.1 keep every character: a shared prefix says nothing about them."""
+    return word if any(ch.isdigit() for ch in word) else word[:STEM]
 
 
 def key_terms(text: str) -> set[str]:

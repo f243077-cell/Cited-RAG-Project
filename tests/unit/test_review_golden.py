@@ -167,7 +167,7 @@ def test_the_closest_text_line_stays_for_a_real_match():
     assert "confirm it does NOT answer" in text and ">>> The annual fee is listed here. <<<" in text
 
 
-def test_sentence_matching_cannot_tell_revisions_apart_but_the_term_list_can():
-    assert review.key_terms("800-61r2") == review.key_terms("800-61r3")  # the limit the docstring states
+def test_sentence_matching_and_the_term_list_both_tell_revisions_apart():
+    assert review.key_terms("800-61r2") != review.key_terms("800-61r3")  # identifiers with a digit stay whole
     docs = {"a.pdf": {1: "See SP 800-61r3 here."}}
     assert "  800-61r2: not found in the corpus" in review.term_lines("Does 800-61r2 apply?", docs)
