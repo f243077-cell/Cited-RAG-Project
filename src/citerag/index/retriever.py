@@ -143,6 +143,16 @@ class HybridRetriever:
             key=lambda c: (c.doc_name, c.page or 0, c.chunk_id),
         )
 
+    def page_chunks(self, doc_id: str, page: int) -> list[Chunk]:
+        """The stored chunks of one page, in order. read_page uses this: it never opens the file."""
+        nodes = self._store.docstore.docs.values()
+        found = [
+            _to_chunk(NodeWithScore(node=n))
+            for n in nodes
+            if n.metadata.get("doc_id") == doc_id and n.metadata.get("page") == page
+        ]
+        return sorted(found, key=lambda c: c.chunk_id)
+
     def has_documents(self, doc_ids: list[str] | None = None) -> bool:
         return self._store.has_chunks(doc_ids)
 

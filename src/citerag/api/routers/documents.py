@@ -10,7 +10,7 @@ from citerag.api.deps import Services, get_app_settings, get_services, require_a
 from citerag.config import Settings
 from citerag.errors import FileTooLargeError
 from citerag.ingest.loaders import sanitize_name, validate_file
-from citerag.ingest.manifest import load_manifest
+from citerag.ingest.manifest import document_infos, load_manifest
 from citerag.schemas import DocumentInfo, IngestReport
 
 router = APIRouter(prefix="/v1/documents", dependencies=[Depends(require_api_key)])
@@ -46,12 +46,7 @@ def upload(
 @router.get("")
 def list_documents(settings: Annotated[Settings, Depends(get_app_settings)]) -> list[DocumentInfo]:
     manifest = load_manifest(settings.index_dir)  # the file only: listing never opens Chroma
-    if manifest is None:
-        return []
-    return [
-        DocumentInfo(doc_id=doc_id, doc_name=entry.name, **entry.model_dump(exclude={"name", "sha256"}))
-        for doc_id, entry in manifest.docs.items()
-    ]
+    return [] if manifest is None else document_infos(manifest)
 
 
 @router.delete("/{doc_id}", status_code=204)

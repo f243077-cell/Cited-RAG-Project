@@ -12,6 +12,7 @@ from citerag.cache.namespace import cache_namespace, corpus_version
 from citerag.config import Settings
 from citerag.errors import IndexMismatchError
 from citerag.prompts import load_prompt
+from citerag.schemas import DocumentInfo
 
 SCHEMA_VERSION = 1
 
@@ -88,6 +89,13 @@ def check_manifest(manifest: Manifest, settings: Settings, embedding_dim: int | 
             f"index was built with {found} but settings say {different}; "
             "restore the settings, or delete the index and ingest again"
         )
+
+
+def document_infos(manifest: Manifest) -> list[DocumentInfo]:
+    return [
+        DocumentInfo(doc_id=doc_id, doc_name=entry.name, **entry.model_dump(exclude={"name", "sha256"}))
+        for doc_id, entry in manifest.docs.items()
+    ]
 
 
 def current_namespace(settings: Settings, manifest: Manifest) -> str:

@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     min_image_bytes: int = 5000
 
     crew_max_seconds: int = 120
+
+    agent_tool_result_chars: int = 6000  # per tool call: hits are cut to this many characters
+    mcp_mode: Literal["api", "local"] = "api"  # api: call the backend over HTTP; local: open the index here
     crewai_disable_telemetry: bool = True
     otel_sdk_disabled: bool = True
 
