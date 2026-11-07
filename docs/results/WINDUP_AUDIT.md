@@ -10,7 +10,7 @@ run on `FakeGateway`, the fake OpenAI server and a hash embedder.
 | `uv sync --locked --extra dev` | Lock is current: 257 packages resolved, 224 checked |
 | `uv run ruff check .` and `uv run ruff format --check .` | Clean |
 | `uv run pytest` before the wind-up fixes | 625 passed, 1 deselected |
-| `uv run pytest` after the wind-up fixes | 666 passed, 1 deselected (the count grows with the wind-up tests) |
+| `uv run pytest` after the wind-up fixes | 669 passed, 1 deselected, 0 skipped, 0 xfail |
 | Skipped or xfail tests | **None.** One test is deselected by default: `tests/live/test_answer.py::test_one_real_cited_answer`, marked `live`, because it spends a real request (`uv run pytest -m live`) |
 | `uv run python scripts/check_release.py` | Passes: no tracked secret, local or generated file, no attribution line, and every golden, cache-pair, experiment and `.env.example` file matches the code |
 
@@ -154,5 +154,6 @@ human step or a live run that has not happened. *missing*: not built.
 | The empty-sequence crash in the unanswerable branch | Not reproducible in 6 edge cases; now pinned by 12 regression tests | same commit's tests |
 | `.claude/` and `.mcp.json` were untracked but not ignored | Ignored, not deleted | `chore: ignore local tool config and stray index and cache folders` |
 | ARCHITECTURE Appendix D had drifted from `.env.example` | Synced | `docs: sync ARCHITECTURE Appendix D with .env.example` |
+| `citerag mcp --local` deadlocked on Windows under a real SDK stdio client at the first search | The index and embedder load on the main thread before serving; stdout is redirected while they load | `fix: load the index before serving MCP so a stdio client cannot deadlock it` |
 | `bench-cache` would run its "on" pass without a cache once the default was off | It forces the cache on for its own run folder | in the cache commit |
 | No single leakage and schema check | `scripts/check_release.py` plus tests | `test: add leakage, attribution and schema release checks` |

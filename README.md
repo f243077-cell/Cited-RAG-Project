@@ -4,7 +4,7 @@ Ask questions about your own documents and get answers whose citations are check
 
 Python only: FastAPI backend, Streamlit frontend, OpenRouter free models, local embeddings. It runs on one machine for one person. It is a practice project for phases 0 to 3 of a GenAI roadmap (see [Roadmap coverage](#roadmap-coverage)).
 
-**Status:** milestones M0 to M12 are built and tested (666 tests, no network). Every quality number is PROVISIONAL until a human verifies the golden set: see [Results](#results-provisional), [Limitations](#limitations) and [the handoff](docs/results/HANDOFF.md). All docs are listed in [docs/results/INDEX.md](docs/results/INDEX.md).
+**Status:** milestones M0 to M12 are built and tested (669 tests, no network). Every quality number is PROVISIONAL until a human verifies the golden set: see [Results](#results-provisional), [Limitations](#limitations) and [the handoff](docs/results/HANDOFF.md). All docs are listed in [docs/results/INDEX.md](docs/results/INDEX.md).
 
 ## How it works
 
