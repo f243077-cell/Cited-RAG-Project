@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from citerag.api.deps import get_app_settings, get_cache
 from citerag.cache.base import CacheBackend, CacheStats
 from citerag.config import Settings
+from citerag.eval.cache_tools import load_sweep, threshold_warning
 from citerag.ingest.manifest import Manifest, current_namespace, load_manifest
 from citerag.llm.budget import requests_last_24h
 
@@ -37,6 +38,7 @@ class HealthResponse(BaseModel):
     cache: CacheStats
     llm_requests_24h: int
     max_requests_per_day: int
+    warnings: list[str] = []  # e.g. the cache running on an unvalidated threshold
 
 
 def _versions() -> dict[str, str]:
@@ -62,4 +64,9 @@ def health(
         cache=cache.stats(),
         llm_requests_24h=requests_last_24h(settings.logs_db_path, provider="openrouter"),
         max_requests_per_day=settings.max_requests_per_day,
+        warnings=[
+            w
+            for w in [threshold_warning(settings.cache_enabled, settings.cache_threshold, load_sweep())]
+            if w
+        ],
     )

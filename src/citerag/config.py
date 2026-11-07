@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Provider = Literal["openrouter", "gemini"]
@@ -61,7 +61,9 @@ class Settings(BaseSettings):
     context_token_budget: int = 6000
     history_turns: int = 4
 
-    cache_enabled: bool = True
+    cache_enabled: bool = (
+        False  # off until a human-labelled sweep validates CACHE_THRESHOLD (README, HANDOFF.md)
+    )
     cache_threshold: float = 0.92
     cache_ttl_days: int = 7
     cache_max_entries: int = 10_000
@@ -117,7 +119,27 @@ class UISettings(BaseSettings):
     citerag_api_key: SecretStr | None = None
 
 
+class SettingsError(Exception):
+    """Required settings are missing or invalid. The message names environment variables, never their values."""
+
+
+def describe_settings_error(exc: ValidationError) -> str:
+    missing = sorted({str(e["loc"][0]).upper() for e in exc.errors() if e["type"] == "missing" and e["loc"]})
+    invalid = sorted({str(e["loc"][0]).upper() for e in exc.errors() if e["type"] != "missing" and e["loc"]})
+    parts = ([f"missing {', '.join(missing)}"] if missing else []) + (
+        [f"invalid {', '.join(invalid)}"] if invalid else []
+    )
+    return (
+        f"CiteRAG is not configured: {'; '.join(parts)}. Copy .env.example to .env in the folder you run from, "
+        "set OPENROUTER_API_KEY and the MODEL_* lines, then start again (README, Configuration)."
+    )
+
+
 @lru_cache
 def get_settings() -> Settings:
-    """Fails fast with a validation error when a required setting is missing (F-STR-3)."""
-    return Settings()
+    """Fails fast with a clear SettingsError when a required setting is missing (F-STR-3). `from None`: the validation
+    error's own text would echo the invalid values."""
+    try:
+        return Settings()
+    except ValidationError as exc:
+        raise SettingsError(describe_settings_error(exc)) from None

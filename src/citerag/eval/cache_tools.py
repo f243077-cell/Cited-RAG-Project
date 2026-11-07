@@ -133,6 +133,28 @@ def sweep_pairs(
     )
 
 
+def threshold_warning(enabled: bool, threshold: float, sweep: SweepResult | None) -> str | None:
+    """Why the cache threshold cannot be trusted yet, or None. Only a sweep on enough labelled pairs that recommends this
+    exact threshold counts as validated; the code never picks the threshold itself."""
+    if not enabled:
+        return None
+    if sweep is None:
+        reason = "no cache-sweep has run on labelled pairs"
+    elif not sweep.enough_pairs:
+        reason = (
+            f"the last sweep had only {sweep.n_equivalent} equivalent and {sweep.n_near_miss} near-miss pairs"
+        )
+    elif sweep.recommended is None or abs(sweep.recommended - threshold) > 1e-9:
+        reason = f"the last sweep recommended {sweep.recommended}, not {threshold}"
+    else:
+        return None
+    return (
+        f"CACHE_ENABLED is true but CACHE_THRESHOLD={threshold} is an unvalidated placeholder ({reason}). "
+        "The cache may serve a wrong answer to a similar question. Set CACHE_ENABLED=false, or label pairs and run "
+        "uv run citerag eval cache-sweep (docs/results/HANDOFF.md)."
+    )
+
+
 def save_sweep(result: SweepResult, path: Path = SWEEP_FILE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(result.model_dump_json(indent=2), encoding="utf-8")

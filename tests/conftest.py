@@ -12,9 +12,11 @@ def _no_settings_in_the_environment(monkeypatch):
 
 @pytest.fixture
 def settings(tmp_path) -> Settings:
-    """Isolated settings: no .env file, placeholder model ids, a temp data folder."""
+    """Isolated settings: no .env file, placeholder model ids, a temp data folder. The cache is on here so its paths stay
+    tested; the shipped default is off (tests/unit/test_config.py)."""
     return Settings(
         _env_file=None,
+        cache_enabled=True,
         openrouter_api_key="test-key",
         gemini_api_key="test-gemini-key",
         model_fast="vendor/fast:free",

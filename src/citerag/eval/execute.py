@@ -141,9 +141,13 @@ def execute_bench(
             max_entries=settings.cache_max_entries,
         )
 
+        on = settings.model_copy(
+            update={"cache_enabled": True}
+        )  # the benchmark measures the cache, whatever .env says
+
         def deps(backend: NoOpCache | PersistentCache) -> Deps:
             return Deps(
-                cfg=settings,
+                cfg=on,
                 llm=llm,
                 retriever=retriever,
                 cache=backend,

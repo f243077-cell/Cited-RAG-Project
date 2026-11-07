@@ -21,3 +21,5 @@ except ApiError as exc:
 else:
     used, limit = health["llm_requests_24h"], health["max_requests_per_day"]
     st.caption(f"Backend is running · {used} of {limit} LLM requests used in the last 24 hours")
+    for warning in health.get("warnings", []):
+        st.warning(warning)
