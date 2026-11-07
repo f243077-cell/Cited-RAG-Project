@@ -199,3 +199,28 @@ def test_stdout_is_untouched_when_the_cli_starts(tmp_path):
     )
     lines = [line for line in done.stdout.splitlines() if line.strip()]
     assert lines and all(re.match(r"^\{.*\"jsonrpc\"", line) for line in lines), done.stdout[:300]
+
+
+def test_warm_up_loads_the_index_and_the_embedder_before_serving(local_index):
+    local_index.warm_up()
+    assert local_index._library is not None and local_index._retriever is not None
+    assert local_index.call("search_documents", {"query": "how many days to return items"}).ok
+
+
+def test_warm_up_on_an_empty_index_loads_nothing(settings):
+    backend = LocalBackend(settings, settings.index_dir)
+    backend.warm_up()
+    assert backend._library is None
+
+
+def test_warm_up_keeps_library_prints_off_stdout(local_index, monkeypatch, capsys):
+    original = local_index._open
+
+    def noisy():
+        print("a library talking on stdout")
+        return original()
+
+    monkeypatch.setattr(local_index, "_open", noisy)
+    local_index.warm_up()
+    captured = capsys.readouterr()
+    assert "talking" not in captured.out and "talking" in captured.err

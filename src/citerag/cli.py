@@ -338,6 +338,7 @@ def mcp(
     settings = get_settings()
     if local or settings.mcp_mode == "local":
         backend = LocalBackend(settings, index_dir or settings.index_dir)
+        backend.warm_up()  # on the main thread: see LocalBackend.warm_up
     else:
         key = settings.citerag_api_key.get_secret_value() if settings.citerag_api_key else None
         backend = HttpBackend(settings.api_base_url, key)

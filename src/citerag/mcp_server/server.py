@@ -7,6 +7,7 @@ goes to stderr.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sys
 from pathlib import Path
@@ -59,11 +60,25 @@ class HttpBackend:
 
 
 class LocalBackend:
-    """Opens the index on first use: listing needs only the manifest, so it stays fast."""
+    """Runs the tools on the index in this process. `citerag mcp --local` calls warm_up() before serving."""
 
     def __init__(self, settings: Settings, index_dir: Path) -> None:
         self._cfg, self._dir = settings, index_dir
         self._library = None
+        self._retriever = None
+
+    def warm_up(self) -> None:
+        """Load the index and the embedding model on the main thread, before the stdio server starts. On Windows the
+        first import of numpy or torch inside the worker thread that runs a tool deadlocks against the stdio reader
+        (found at the wind-up with the SDK's stdio client). An empty index has nothing to search, so it loads nothing.
+        stdout is the protocol, so anything a library prints while loading goes to stderr."""
+        from citerag.ingest.manifest import load_manifest
+
+        if load_manifest(self._dir) is None:
+            return
+        with contextlib.redirect_stdout(sys.stderr):
+            self._open()
+            self._retriever.embed_query("warm up")
 
     def _open(self):  # noqa: ANN202 - returns a ToolLibrary; imported late because the index is heavy
         if self._library is None:
@@ -75,8 +90,8 @@ class LocalBackend:
             manifest = load_manifest(self._dir)
             if manifest is not None:
                 check_manifest(manifest, self._cfg)
-            retriever = HybridRetriever(open_store(self._cfg, self._dir), self._cfg)
-            self._library = ToolLibrary(self._cfg, retriever, lambda: load_manifest(self._dir))
+            self._retriever = HybridRetriever(open_store(self._cfg, self._dir), self._cfg)
+            self._library = ToolLibrary(self._cfg, self._retriever, lambda: load_manifest(self._dir))
         return self._library
 
     def call(self, name: ToolName, args: dict[str, Any]) -> ToolResult:
