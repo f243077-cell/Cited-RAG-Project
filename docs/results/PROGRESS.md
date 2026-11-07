@@ -7,6 +7,7 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 | M6 semantic cache | built and pushed; exit criteria need your labels and a live replay |
 | M7 CrewAI | built and pushed; E7 and every live crew run are left unrun |
 | M8 polish | built and pushed; Docker untested; a live first answer not run |
+| Phase 3 (M9 to M12) | planned in `docs/PHASE3_PRD.md` and `docs/PHASE3_ARCHITECTURE.md`; waiting for "Build M9" |
 
 ## M6
 
