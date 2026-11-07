@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-from citerag.agent_graph.graph import AgentGraph
+from citerag.agent_graph.factory import build_agent
 from citerag.agents.deep_mode import DeepCrew
 from citerag.agents.runtime import CrewRuntime
 from citerag.analytics.logs import LogStore
@@ -83,7 +83,7 @@ def execute_run(
                 log=log,
                 namespace=lambda: "eval",
                 deep=DeepCrew(CrewRuntime(settings, llm, log)) if mode == "deep" else None,
-                agent=AgentGraph(settings, llm) if mode == "agent" else None,
+                agent=build_agent(settings, llm) if mode == "agent" else None,
                 tool_library=lambda scope: ToolLibrary(
                     settings, retriever, lambda: load_manifest(index_dir), scope
                 ),

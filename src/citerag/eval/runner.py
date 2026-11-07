@@ -195,7 +195,8 @@ async def run_items(
         record = records.get(item.id)
         if record is None or record.status == "error":
             worst = WORST_IMAGE_REQUESTS if item.image_path else WORST_ANSWER_REQUESTS
-            worst = {"deep": WORST_DEEP_REQUESTS, "agent": WORST_AGENT_REQUESTS}.get(mode, worst)
+            agent_worst = deps.agent.worst_requests() if deps.agent is not None else WORST_AGENT_REQUESTS
+            worst = {"deep": WORST_DEEP_REQUESTS, "agent": agent_worst}.get(mode, worst)
             if over_cap(worst):
                 return result("paused", f"--max-requests {max_requests} reached")
             try:

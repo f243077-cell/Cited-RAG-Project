@@ -53,13 +53,21 @@ def tool_argument_leaks(records: list[ItemRecord]) -> int:
     return leaks
 
 
-def estimate(items: list[GoldenItem], mode: str, skip_judge: bool) -> tuple[int, int]:
+SUPERVISOR_TYPICAL, SUPERVISOR_WORST = 5, 11  # one research handoff; agent_graph/supervisor.py for the cap
+
+
+def estimate(
+    items: list[GoldenItem], mode: str, skip_judge: bool, supervisor: bool = False
+) -> tuple[int, int]:
     """(expected, worst case) LLM requests for one run. Image items cost the image path in standard mode."""
+    typical, worst_case = dict(TYPICAL), dict(WORST)
+    if supervisor:
+        typical["agent"], worst_case["agent"] = SUPERVISOR_TYPICAL, SUPERVISOR_WORST
     expected = worst = 0
     for item in items:
         image = item.image_path is not None and mode == "standard"
-        expected += 3 if image else TYPICAL[mode]
-        worst += WORST_IMAGE_REQUESTS if image else WORST[mode]
+        expected += 3 if image else typical[mode]
+        worst += WORST_IMAGE_REQUESTS if image else worst_case[mode]
         if not skip_judge and item.type in ANSWER_TYPES:
             expected, worst = expected + 1, worst + 1
     return expected, worst
@@ -119,11 +127,13 @@ def table(columns: list[ModeColumn]) -> list[tuple[str, list[str]]]:
     return rows
 
 
-def render(columns: list[ModeColumn], chart: str | None = None) -> str:
+def render(
+    columns: list[ModeColumn], chart: str | None = None, title: str = "E8: standard vs Deep vs Agent"
+) -> str:
     unverified = max((c.summary.unverified_items for c in columns), default=0)
     head = "| Metric | " + " | ".join(c.name for c in columns) + " |"
     lines = [
-        "# E8: standard vs Deep vs Agent" + (" (provisional)" if unverified else ""),
+        f"# {title}" + (" (provisional)" if unverified else ""),
         "",
         "Runs: " + ", ".join(f"`{c.summary.run_id}`" for c in columns) + ".",
         "",
@@ -134,5 +144,5 @@ def render(columns: list[ModeColumn], chart: str | None = None) -> str:
     lines += ["", head, "|---|" + "---|" * len(columns)]
     lines += [f"| {name} | " + " | ".join(cells) + " |" for name, cells in table(columns)]
     if chart:
-        lines += ["", f"![E8 modes]({chart})"]
+        lines += ["", f"![{title}]({chart})"]
     return "\n".join(lines) + "\n"

@@ -239,7 +239,8 @@ def eval_run(
         if estimate:
             from citerag.eval.modes import estimate as estimate_requests
 
-            expected, worst = estimate_requests(items, mode, skip_judge)
+            team = settings.agent_architecture == "supervisor"
+            expected, worst = estimate_requests(items, mode, skip_judge, supervisor=team)
             typer.echo(f"{len(items)} items in {mode} mode: about {expected} LLM requests, {worst} at worst")
             return
         _check_index(target, settings)
@@ -552,8 +553,10 @@ def eval_analyze_failures(
 def eval_report_e8(
     runs: Annotated[list[str], typer.Argument(help="Run ids, in the column order you want")],
     out: Annotated[Path, typer.Option(help="The report")] = Path("docs/results/E8_modes.md"),
+    title: Annotated[str, typer.Option(help="Report heading")] = "E8: standard vs Deep vs Agent",
 ) -> None:
-    """E8 table: standard, Deep and Agent runs side by side. Reads run folders only: zero LLM requests."""
+    """E8 table: standard, Deep and Agent runs side by side. Reads run folders only: zero LLM requests.
+    M12 uses it too, for single agent vs supervisor vs Deep."""
     from citerag.analytics.plots import grouped_bars
     from citerag.eval.modes import ModeColumn, render
     from citerag.eval.report import load_detail
@@ -569,11 +572,11 @@ def eval_report_e8(
     import pandas as pd
 
     shares = pd.DataFrame({c.name: c.summary.headline() for c in columns}).dropna(how="all")
-    chart = out.with_name("e8_modes.png")
+    chart = out.with_suffix(".png")
     out.parent.mkdir(parents=True, exist_ok=True)
     if not shares.empty:
-        grouped_bars(shares.iloc[:, :3], "E8: standard vs Deep vs Agent").savefig(chart, dpi=150)
-    out.write_text(render(columns, chart.name if not shares.empty else None), encoding="utf-8")
+        grouped_bars(shares.iloc[:, :3], title).savefig(chart, dpi=150)
+    out.write_text(render(columns, chart.name if not shares.empty else None, title), encoding="utf-8")
     typer.echo(f"Report: {out}")
 
 

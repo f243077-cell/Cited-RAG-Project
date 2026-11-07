@@ -1,0 +1,5 @@
+name: m12_supervisor
+mode: agent
+index_dir: data/index_eval
+overrides:
+  agent_architecture: supervisor

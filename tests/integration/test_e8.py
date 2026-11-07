@@ -152,7 +152,7 @@ def test_report_e8_renders_three_columns_from_saved_runs(settings, tmp_path, mon
     assert "| Metric | e8_standard | e8_deep | e8_agent |" in text and "(provisional)" in text
     assert "| multi_chunk context coverage | 0 of 1 (0%) | 0 of 1 (0%) | 1 of 1 (100%) |" in text
     assert "| Mean LLM requests per item | 1.0 | 3.0 | 3.0 |" in text
-    assert (out.parent / "e8_modes.png").exists()
+    assert (out.parent / "E8_modes.png").exists()
 
 
 def test_a_canary_in_a_tool_argument_is_counted():
