@@ -115,7 +115,8 @@ evaluation), F-SUP (supervisor), F-DEV (AI-assisted development), NF-P3.
 
 ### 5.6 Supervisor and AI-assisted development (M12, optional)
 
-- **F-SUP-1 [COULD]** A LangGraph supervisor with two workers, a researcher (the tool loop) and a writer (synthesis), using handoffs.
+- **F-SUP-1 [COULD, built in M12]** A LangGraph supervisor with two workers, a researcher (the tool loop) and a writer (synthesis),
+  using handoffs. `AGENT_ARCHITECTURE=supervisor` selects it; 5 requests with one handoff, at most 11.
 - **F-SUP-2 [COULD]** Compare supervisor, single agent and CrewAI Deep mode on the same items: requests, latency and quality, then
   write `docs/results/M12_multi_agent.md` answering "when does multi-agent add value".
 - **F-DEV-1 [MUST in M12]** `docs/AI_ASSISTED_DEV.md`: per milestone, what was delegated to Claude Code, what it got wrong (for

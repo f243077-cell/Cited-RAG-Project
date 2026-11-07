@@ -10,7 +10,8 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 | Phase 3 M9 tools and MCP | built and pushed; 0 LLM requests |
 | Phase 3 M10 agent graph and Agent mode | built and pushed; 3 LLM requests (tool-calling spike) |
 | Phase 3 M11 evaluation E8 | built and pushed; the live E8 run waits for the verified golden set |
-| Phase 3 M12 | in progress (Coder delegated decisions on 2026-11-07: see PHASE3_PRD section 10) |
+| Phase 3 M12 supervisor, comparison, dev log | built and pushed; the live comparison waits for the verified golden set |
+| **Phase 3** | **complete.** Live requests in the phase: 3 (the M10 spike). Decisions taken under delegation: PHASE3_PRD section 10 |
 
 ## M6
 
@@ -70,3 +71,18 @@ check on tool arguments, request estimate, the E8 table); `citerag eval run --es
 a no-network rehearsal of all three modes; `M11_test_guide.md`.
 
 **Not done:** the live E8 run. It needs the verified golden set and about 405 requests for all three modes.
+
+## Phase 3: M12
+
+**Done:** `agent_graph/supervisor.py` (supervisor, researcher and writer, with handoffs and caps), `agent_graph/factory.py`,
+`AGENT_ARCHITECTURE`, the `supervisor` prompt, `m12_single.yaml` and `m12_supervisor.yaml`, `report-e8 --title` for the comparison,
+the supervisor's cost in `--estimate`, `docs/AI_ASSISTED_DEV.md`, `M12_test_guide.md`.
+
+**Not done:** the live comparison and its conclusion (about 90 to 210 requests on 15 items), which waits for the verified golden set.
+
+## Phase 3: what needs a live run, in order
+
+1. One Agent-mode question (3 requests usually): M10 guide, step 3.
+2. One supervisor question (5 usually): M12 guide, step 2.
+3. E8 on the verified set (about 405 for all three modes): M11 guide.
+4. The M12 comparison (about 90 if E8's runs are reused): M12 guide.

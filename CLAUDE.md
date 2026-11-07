@@ -6,7 +6,8 @@ Built to practise RAG, vector DBs, evaluation, multimodal input, structured outp
 **Read first, in this order:** `docs/PRD.md` (what, requirement IDs, milestones M0 to M8) then `docs/ARCHITECTURE.md`
 (how; Appendix A holds tested reference code). If this file and those docs disagree, stop and ask.
 **Phase 3 (M9 to M12, agent mode):** `docs/PHASE3_PRD.md` then `docs/PHASE3_ARCHITECTURE.md`. They add to the two above and
-override nothing built in M0 to M8. Status: planned, not built; wait for "Build M9".
+override nothing built in M0 to M8. Status: built; the live E8 and M12 runs wait for the verified golden set.
+`docs/AI_ASSISTED_DEV.md` logs how the project was built with Claude Code.
 
 ## Working agreement
 
@@ -55,6 +56,7 @@ uv run citerag ingest data/sample --config configs/experiments/e1_chunk_256.yaml
 uv run pytest tests/integration/test_agent_mode.py   # Agent mode on FakeGateway and the fake server, zero LLM requests
 uv run citerag eval run --golden F --config configs/experiments/e8_agent.yaml --skip-type image --estimate   # E8 cost, no request
 uv run citerag eval report-e8 <standard_run> <deep_run> <agent_run>   # E8 table and chart, zero LLM requests
+uv run citerag eval report-e8 <single> <supervisor> <deep> --title "M12: single agent vs supervisor vs Deep" --out docs/results/M12_multi_agent.md
 uv run citerag mcp                        # MCP server over stdio; calls the running API (add --local with the API stopped)
 uv run citerag quota                      # requests in the last 24 hours against each guard, zero LLM requests
 uv run citerag logs purge --days 30       # delete old log rows
@@ -221,6 +223,8 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - **Docker's `env_file` keeps an inline comment after an empty value:** `LLM_TEMPERATURE=   # ...` became the text of the comment,
   and `CITERAG_API_KEY` would have become one too. Comments for empty values sit on their own line in `.env.example`.
 - **The Docker image is about 21 GB** (CUDA PyTorch from the lock). Both services share one image (`citerag:local`).
+- **The M12 supervisor costs more by design:** 5 requests with one research handoff against 3 for the single agent, at most 11.
+  It is off unless `AGENT_ARCHITECTURE=supervisor`.
 - **FastMCP logs every request at INFO** (`Processing request of type ...`). Over stdio, stdout is the protocol: send logs to stderr.
 - Free models expire: on 2026-11-07 OpenRouter's list showed `liquid/lfm-2.5-2.6b:free` expiring on 2026-11-13, and the day before it
   showed no expiry. Re-run `scripts/pick_free_models.py` before choosing a judge.

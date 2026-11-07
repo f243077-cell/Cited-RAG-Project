@@ -283,9 +283,14 @@ Cost and caps are in PHASE3_PRD section 9.
 
 ## 12. M12: supervisor and workers (optional)
 
-A second graph in `agent_graph/supervisor.py`. The supervisor (`fast`) routes to a researcher worker (the act, tools, reflect loop
-above) or a writer worker (synthesis), and ends when the writer has a verified answer. Handoffs pass the state, never free text.
-Expected cost: the single agent's plus 2 to 3 supervisor calls, so 6 to 10, capped at 12.
+Built as a second graph in `agent_graph/supervisor.py`, chosen with `AGENT_ARCHITECTURE=supervisor` (default `single`;
+`agent_graph/factory.py`). The supervisor (`fast`, schema `Route`) reads the question, the tasks done and the evidence, and hands
+off: `research` with one task, or `answer`. The researcher worker is the single agent's loop on that task with
+`agent_max_steps=3`. The writer worker is the verified synthesis in the pipeline, so `answer` ends the graph. Handoffs pass state
+(hits, steps), never one worker's free text into another's prompt.
+
+Caps: 3 supervisor turns and 2 research handoffs. Cost: 5 requests with one handoff (supervise, plan, reflect, supervise,
+synthesize); at most 11 (3 + 2 × 3 + synthesis + one retry). The guard needs room for 11 before the first call.
 
 The comparison runs supervisor, single agent and CrewAI Deep mode on the same items. To save requests, use the 5 `multi_chunk`
 items plus 10 answerable ones: about 15 × (8 + 5 + 4) + 45 judge calls, or about 300. The write-up answers one question: on these
