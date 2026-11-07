@@ -1,0 +1,3 @@
+name: e8_agent
+mode: agent
+index_dir: data/index_eval
