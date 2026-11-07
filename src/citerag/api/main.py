@@ -20,7 +20,8 @@ from citerag.api.deps import Services, build_services
 from citerag.api.routers import cache, chat, documents, evaluation, health, logs, tools
 from citerag.cache.base import CacheBackend
 from citerag.cache.store import open_cache
-from citerag.config import Settings, get_settings
+from citerag.config import Settings, SettingsError, get_settings
+from citerag.eval.cache_tools import load_sweep, threshold_warning
 from citerag.ingest.manifest import check_manifest, current_namespace, load_manifest
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,11 @@ class _SettingsCORS:
         if scope["type"] == "lifespan":
             await self._app(scope, receive, send)
             return
+        problem = getattr(scope["app"].state, "config_error", None)
+        if problem is not None:  # not configured: every request says why, the UI shows it, nothing crashes
+            body = errors.LLMUnavailableError(problem).to_response().model_dump()
+            await JSONResponse(status_code=503, content=body)(scope, receive, send)
+            return
         if self._cors is None:
             origins = scope["app"].state.settings.cors_origin_list
             self._cors = CORSMiddleware(
@@ -60,12 +66,22 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        cfg = settings or get_settings()  # a missing required setting stops start-up here
-        manifest = load_manifest(cfg.index_dir)
-        if manifest is not None:
-            check_manifest(manifest, cfg)  # F-ING-4: never serve vectors built with other settings
+        app.state.config_error = None
+        try:
+            cfg = settings or get_settings()
+            manifest = load_manifest(cfg.index_dir)
+            if manifest is not None:
+                check_manifest(manifest, cfg)  # F-ING-4: never serve vectors built with other settings
+        except (SettingsError, errors.IndexMismatchError) as exc:
+            app.state.config_error = getattr(exc, "message", str(exc))
+            logger.error("%s", app.state.config_error)  # one clear line: no stack trace, no setting values
+            yield
+            return
         app.state.settings = cfg
         app.state.cache = open_cache(cfg)
+        warning = threshold_warning(cfg.cache_enabled, cfg.cache_threshold, load_sweep())
+        if warning:
+            logger.warning("%s", warning)
         if manifest is not None:  # `citerag ingest` runs with the API stopped, so catch up here (ADR-7)
             app.state.cache.invalidate_except(current_namespace(cfg, manifest))
         app.state.log = LogStore(cfg.logs_db_path)

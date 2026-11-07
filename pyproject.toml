@@ -43,7 +43,7 @@ ragas = ["ragas>=0.4"]
 audio = ["faster-whisper>=1.0"]
 
 [project.scripts]
-citerag = "citerag.cli:app"
+citerag = "citerag.cli:run"
 
 [build-system]
 requires = ["hatchling"]

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 
-from citerag.config import Settings, UISettings, get_settings
+from citerag.config import Settings, SettingsError, UISettings, get_settings
 from citerag.errors import CiteRAGError, ValidationFailedError
 
 if TYPE_CHECKING:
@@ -23,6 +23,15 @@ cache_app = typer.Typer(no_args_is_help=True, help="Inspect or empty the semanti
 app.add_typer(cache_app, name="cache")
 logs_app = typer.Typer(no_args_is_help=True, help="Manage the local request log.")
 app.add_typer(logs_app, name="logs")
+
+
+def run() -> None:
+    """The `citerag` entry point: a missing setting is one clear line on stderr and exit code 2, not a stack trace."""
+    try:
+        app()
+    except SettingsError as exc:
+        typer.echo(str(exc), err=True)
+        raise SystemExit(2) from None
 
 
 @app.callback()
@@ -364,9 +373,14 @@ def logs_purge(
 def cache_stats() -> None:
     """Entries and backend. Reads the file, so it works with the API stopped."""
     from citerag.cache.store import open_cache
+    from citerag.eval.cache_tools import load_sweep, threshold_warning
 
-    stats = open_cache(get_settings()).stats()
+    settings = get_settings()
+    stats = open_cache(settings).stats()
     typer.echo(f"backend: {stats.backend}; enabled: {stats.enabled}; entries: {stats.entries}")
+    warning = threshold_warning(settings.cache_enabled, settings.cache_threshold, load_sweep())
+    if warning:
+        typer.echo(f"WARNING: {warning}")
 
 
 @cache_app.command("clear")

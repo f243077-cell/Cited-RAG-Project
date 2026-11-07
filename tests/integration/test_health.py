@@ -1,9 +1,8 @@
-import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 from citerag.api.main import create_app
-from citerag.errors import BudgetExceededError, IndexMismatchError
+from citerag.errors import BudgetExceededError
 from citerag.ingest.manifest import current_namespace, new_manifest, save_manifest
 from citerag.schemas import ErrorResponse
 
@@ -66,10 +65,12 @@ def test_health_shows_manifest_and_namespace_after_ingest(settings):
 
 
 def test_startup_refuses_an_index_built_with_other_settings(settings):
+    """It no longer crashes with a stack trace: every request answers 503 with the reason (wind-up, DECISIONS.md)."""
     save_manifest(settings.index_dir, new_manifest(settings, embedding_dim=128))
     changed = settings.model_copy(update={"chunk_size": 256})
-    with pytest.raises(IndexMismatchError), _client(changed):
-        pass
+    with _client(changed) as client:
+        response = client.get("/health")
+    assert response.status_code == 503 and "chunk_size" in response.json()["error"]["message"]
 
 
 def test_openapi_docs_are_served(settings):
