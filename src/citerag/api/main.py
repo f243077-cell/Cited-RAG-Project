@@ -17,7 +17,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from citerag import errors
 from citerag.analytics.logs import LogStore
 from citerag.api.deps import Services, build_services
-from citerag.api.routers import cache, chat, documents, evaluation, health, logs
+from citerag.api.routers import cache, chat, documents, evaluation, health, logs, tools
 from citerag.cache.base import CacheBackend
 from citerag.cache.store import open_cache
 from citerag.config import Settings, get_settings
@@ -84,6 +84,7 @@ def create_app(
     app.include_router(evaluation.router)
     app.include_router(cache.router)
     app.include_router(logs.router)
+    app.include_router(tools.router)
 
     @app.exception_handler(errors.CiteRAGError)
     async def on_typed_error(_: Request, exc: errors.CiteRAGError) -> JSONResponse:
