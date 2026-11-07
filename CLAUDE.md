@@ -232,6 +232,9 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - **The Docker image is about 21 GB** (CUDA PyTorch from the lock). Both services share one image (`citerag:local`).
 - **The M12 supervisor costs more by design:** 5 requests with one research handoff against 3 for the single agent, at most 11.
   It is off unless `AGENT_ARCHITECTURE=supervisor`.
+- **`citerag mcp --local` hung on Windows under a real MCP client:** the first `import numpy` ran in FastMCP's tool worker thread and
+  deadlocked against the stdio reader. A bash pipe hid it, and the M9 subprocess test used an empty index. `LocalBackend.warm_up()`
+  now loads the index and the embedder on the main thread, with stdout redirected to stderr (llama-index prints "Using MockLLM").
 - **FastMCP logs every request at INFO** (`Processing request of type ...`). Over stdio, stdout is the protocol: send logs to stderr.
 - Free models expire: on 2026-11-07 OpenRouter's list showed `liquid/lfm-2.5-2.6b:free` expiring on 2026-11-13, and the day before it
   showed no expiry. Re-run `scripts/pick_free_models.py` before choosing a judge.
