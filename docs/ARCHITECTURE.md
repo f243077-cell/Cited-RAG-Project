@@ -2369,6 +2369,9 @@ ignore = ["E501"]
 ```
 
 ## Appendix D. `.env.example`
+
+A copy of the repository file, kept in sync at the wind-up (2026-11-07). The file itself wins if they differ.
+
 ```bash
 # Copy to .env and fill in. Never commit .env.
 OPENROUTER_API_KEY=
@@ -2404,7 +2407,8 @@ STRUCTURED_METHOD=auto                           # auto (json_schema, then tools
 LLM_TIMEOUT_S=60
 LLM_MAX_RETRIES=2
 LLM_MAX_TOKENS=2000                              # leave headroom: reasoning models can spend the whole budget thinking
-LLM_TEMPERATURE=                                 # empty = do not send; set only if the chosen model accepts it
+# empty = do not send; set only if the chosen model accepts it
+LLM_TEMPERATURE=
 JUDGE_TEMPERATURE=0
 LLM_MAX_RPM=15                                   # free tier allows 20 per minute
 MAX_REQUESTS_PER_DAY=40                          # free tier allows 50 per day (1000 after buying at least 10 credits)
@@ -2424,7 +2428,8 @@ CONTEXT_TOKEN_BUDGET=6000
 HISTORY_TURNS=4
 
 # --- Semantic cache ---
-CACHE_ENABLED=true
+# Off by default: CACHE_THRESHOLD is an unvalidated placeholder until you label pairs and run eval cache-sweep
+CACHE_ENABLED=false
 CACHE_THRESHOLD=0.92                             # placeholder: replace with the cache-sweep result in M6
 CACHE_TTL_DAYS=7
 CACHE_MAX_ENTRIES=10000
@@ -2440,9 +2445,22 @@ CREW_MAX_SECONDS=120
 CREWAI_DISABLE_TELEMETRY=true
 OTEL_SDK_DISABLED=true
 
+# --- Agent mode, tools and MCP (Phase 3) ---
+AGENT_ENABLED=true
+AGENT_MAX_SUBQUESTIONS=3
+AGENT_MAX_STEPS=6                                # plan, act and reflect calls; with synthesis and one retry, at most 8 requests
+AGENT_RECURSION_LIMIT=25
+AGENT_TIMEOUT_S=240
+AGENT_CONTEXT_MAX_PASSAGES=8
+AGENT_ARCHITECTURE=single                        # single agent, or supervisor: the M12 team (at most 11 requests)
+AGENT_ACTION_METHOD=auto                         # auto: native tool calls, JSON action if they fail | tools | json
+AGENT_TOOL_RESULT_CHARS=6000                     # characters per tool call
+MCP_MODE=api                                     # api: citerag mcp calls the running backend; local: it opens the index (API stopped)
+
 # --- API and UI ---
 DATA_DIR=./data
 CORS_ORIGINS=http://localhost:8501
-CITERAG_API_KEY=                                 # optional: if set, the backend requires header X-API-Key
+# optional: if set, the backend requires header X-API-Key
+CITERAG_API_KEY=
 API_BASE_URL=http://localhost:8000               # used by the Streamlit frontend
 ```
