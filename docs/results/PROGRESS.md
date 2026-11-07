@@ -35,7 +35,7 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 
 ## Decisions for Coder
 
-1. **The cache is on with the placeholder threshold, and that looks unsafe.** `CACHE_ENABLED` defaults to true and `CACHE_THRESHOLD` stays 0.92, as you ordered. A smoke run of the sweep on a throwaway copy, using my proposed labels and not yours, gave a false-hit rate of 33% at 0.92 (14 of 43 near misses) and 0% only at 0.98, where recall is 32%. The set is deliberately adversarial and is not a result. Until you run the sweep, set `CACHE_ENABLED=false` in `.env` if you will rely on answers.
+1. **Resolved at the wind-up (DECISIONS.md, D-1): the cache is now off by default, with a warning when it runs on an unvalidated threshold.** Before that, `CACHE_ENABLED` defaulted to true and `CACHE_THRESHOLD` stays 0.92, as you ordered. A smoke run of the sweep on a throwaway copy, using my proposed labels and not yours, gave a false-hit rate of 33% at 0.92 (14 of 43 near misses) and 0% only at 0.98, where recall is 32%. The set is deliberately adversarial and is not a result. Until you run the sweep, set `CACHE_ENABLED=false` in `.env` if you will rely on answers.
 2. **Tokens saved (F-CAC-7) needs a public schema change.** The requests table and `CacheInfo` have no such field, so the log records saved requests and saved shadow dollars only. `bench-cache` still reports tokens with and without the cache. Approve `saved_tokens` on `CacheInfo` and `requests` if you want it per request.
 3. **The guard misses meaning the reference code cannot see.** `guard_ok` compares digits and a word list, so these pass it: "first" vs "second", "days" vs "hours", "address" vs "leave out". Near misses of that kind can only be stopped by the threshold, which is why it must be so high. A wider guard means changing reference code, so it is your call.
 4. **A crew writes one `llm_calls` row per request, not one per crew.** `CLAUDE.md` rule 2 and ARCHITECTURE section 12 said one row, but the daily guard counts rows, so a Deep question would have counted as 1. I changed the code and both documents. Say so if you want it back.
@@ -86,3 +86,12 @@ the supervisor's cost in `--estimate`, `docs/AI_ASSISTED_DEV.md`, `M12_test_guid
 2. One supervisor question (5 usually): M12 guide, step 2.
 3. E8 on the verified set (about 405 for all three modes): M11 guide.
 4. The M12 comparison (about 90 if E8's runs are reused): M12 guide.
+
+## Wind-up (2026-11-07)
+
+**Done:** audit of every requirement ID (`WINDUP_AUDIT.md`), fixes for what it found (cache off by default with a warning, a clear
+message for missing settings, identifiers kept whole in `review_golden.py`, `.gitignore`, Appendix D), `scripts/check_release.py`,
+`scripts/accept_golden.py`, `HANDOFF.md`, `INDEX.md`, `DECISIONS.md`, README sections (configuration, commands, tests, roadmap
+coverage), PROVISIONAL banners. The live smoke test, the clean-clone proof and the release tag are recorded in `WINDUP_SMOKE.md`.
+
+**Next:** `HANDOFF.md`, in order.

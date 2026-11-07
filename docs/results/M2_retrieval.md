@@ -1,4 +1,6 @@
-# M2 retrieval report
+# M2 retrieval report (PROVISIONAL)
+
+**PROVISIONAL:** every number below comes from golden items no human has verified.
 
 Date: 2026-11-06. LLM requests: 0.
 

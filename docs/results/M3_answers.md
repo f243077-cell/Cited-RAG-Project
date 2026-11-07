@@ -1,4 +1,6 @@
-# M3 answer check
+# M3 answer check (PROVISIONAL)
+
+**PROVISIONAL:** four live questions that show the path works, not an evaluation. The relevance gate was the uncalibrated placeholder 0.30.
 
 Date: 2026-11-06. Model for `fast` and `strong`: `nvidia/nemotron-3.5-super-vl:free` through OpenRouter. Prompt version 1. Index: `data/index`, 6 documents, 290 chunks. Rerank off.
 
