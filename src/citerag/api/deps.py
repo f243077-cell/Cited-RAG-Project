@@ -36,6 +36,7 @@ class Services:
 
 
 def build_services(settings: Settings, log: LogStore, cache: CacheBackend) -> Services:
+    from citerag.agent_graph.graph import AgentGraph
     from citerag.agents.deep_mode import DeepCrew
     from citerag.agents.runtime import CrewRuntime
     from citerag.index.retriever import HybridRetriever
@@ -44,6 +45,7 @@ def build_services(settings: Settings, log: LogStore, cache: CacheBackend) -> Se
     from citerag.ingest.pipeline import Ingestor
     from citerag.llm.gateway import OpenRouterGateway
     from citerag.multimodal.vision import caption_image
+    from citerag.tools.library import ToolLibrary
 
     llm = OpenRouterGateway(settings, log)
 
@@ -62,6 +64,8 @@ def build_services(settings: Settings, log: LogStore, cache: CacheBackend) -> Se
         log=log,
         namespace=lambda: current_namespace(settings, ingestor.manifest),
         deep=DeepCrew(CrewRuntime(settings, llm, log)),
+        agent=AgentGraph(settings, llm),
+        tool_library=lambda scope: ToolLibrary(settings, retriever, lambda: ingestor.manifest, scope),
     )
     return Services(deps, store, ingestor, retriever)
 

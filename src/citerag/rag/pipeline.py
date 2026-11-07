@@ -11,10 +11,10 @@ import json
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import numpy as np
 
@@ -37,6 +37,8 @@ from citerag.rag.context import Chunk, build_context
 from citerag.rag.generate import citation_hint, generate
 from citerag.rag.verify import Passage, needs_retry, verify_citations
 from citerag.schemas import (
+    AgentStep,
+    AgentTrace,
     CacheInfo,
     ChatRequest,
     ChatResponse,
@@ -46,6 +48,7 @@ from citerag.schemas import (
     LLMCitedAnswer,
     UsageInfo,
 )
+from citerag.tools.contracts import ToolResult
 
 R = TypeVar("R")
 NOT_FOUND = "I could not find this in the uploaded documents."
@@ -59,6 +62,26 @@ class DeepAnswer:
 
 class DeepRunner(Protocol):
     async def run(self, question: str, passages: list[Passage], request_id: str) -> DeepAnswer: ...
+
+
+@dataclass(frozen=True)
+class AgentFindings:
+    chunks: list[Chunk]  # every tool hit, in the order found
+    trace: AgentTrace
+    requests: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    shadow_usd: float = 0.0
+
+
+class ToolRunnerLike(Protocol):
+    def run(self, name: str, args: dict[str, Any]) -> ToolResult: ...
+
+
+class AgentRunner(Protocol):
+    async def run(
+        self, question: str, run_tool: Callable[[str, dict[str, Any]], Awaitable[ToolResult]], request_id: str
+    ) -> AgentFindings: ...
 
 
 class Retriever(Protocol):
@@ -82,6 +105,8 @@ class Deps:
     index_lock: threading.Lock = field(default_factory=threading.Lock)  # uploads and searches take turns
     observe: Callable[[list[Passage], list[Chunk]], None] | None = None  # eval: what the generator saw
     deep: DeepRunner | None = None  # Deep mode, built only where a crew may run
+    agent: AgentRunner | None = None  # Agent mode (Phase 3)
+    tool_library: Callable[[list[str] | None], ToolRunnerLike] | None = None  # tools scoped to a doc filter
 
 
 class _Trace:
@@ -133,6 +158,13 @@ async def _indexed(d: Deps, call: Callable[..., R], *args: object) -> R:
 def _reject_unavailable(req: ChatRequest, d: Deps) -> None:
     if req.mode == "deep" and d.deep is None:
         raise ValidationFailedError("Deep mode is not available here")
+    if req.mode == "agent":
+        if d.agent is None or d.tool_library is None or not d.cfg.agent_enabled:
+            raise ValidationFailedError("Agent mode is not available here")
+        if req.image_b64 is not None:
+            raise ValidationFailedError(
+                "Agent mode does not take images yet: use standard mode for image questions"
+            )
 
 
 def assemble(llm_answer: LLMCitedAnswer, citations: list[Citation]) -> tuple[CitedAnswer, list[str]]:
@@ -212,6 +244,8 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
             result = t.add("condense", await call)
         t.standalone = result.parsed.query.strip() or req.message
     question = t.standalone
+    if req.mode == "agent":
+        return await _answer_agent(req, d, t, question)
     search_query = f"{question} {analysis.search_query}" if analysis else question  # F-MM-1
 
     with t.stage("embed"):
@@ -255,8 +289,40 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
         return _refusal(req, t, NOT_FOUND, cache_info)
     if d.observe is not None:
         d.observe(passages, chunks)
-    by_marker = {p.marker: p for p in passages}
+    answer, problems = await _verified_answer(req, d, t, question, passages, picture, warnings)
+    t.usage.latency_ms = t.latency_ms()
+    response = ChatResponse(
+        request_id=t.request_id,
+        session_id=req.session_id,
+        standalone_query=question,
+        answer=answer,
+        cache=cache_info,
+        usage=t.usage,
+        warnings=[*warnings, *problems],
+    )
+    if use_cache and _storable(answer, problems):
+        d.cache.insert(
+            question,
+            np.asarray(embedding),
+            response.model_dump_json(),
+            d.namespace(),
+            cost_usd=t.usage.est_cost_usd,
+        )
+    return response
 
+
+async def _verified_answer(
+    req: ChatRequest,
+    d: Deps,
+    t: _Trace,
+    question: str,
+    passages: list[Passage],
+    picture: tuple[str, str] | None,
+    warnings: list[str],
+) -> tuple[CitedAnswer, list[str]]:
+    """Generate, verify, and retry once on failed citations. Returns the answer and the verification problems;
+    context warnings are appended to `warnings` in place."""
+    by_marker = {p.marker: p for p in passages}
     with t.stage("generate"):
         if req.mode == "deep":
             deep = await d.deep.run(question, passages, t.request_id)
@@ -284,25 +350,63 @@ async def _answer(req: ChatRequest, d: Deps, t: _Trace) -> ChatResponse:
                 citations, citation_warnings = verify_citations(llm_answer.citations, by_marker)
 
     answer, doubts = assemble(llm_answer, citations)
+    return answer, [*citation_warnings, *doubts]
+
+
+async def _answer_agent(req: ChatRequest, d: Deps, t: _Trace, question: str) -> ChatResponse:
+    """Agent mode: the graph gathers evidence, then the standard generate-and-verify path answers (F-GRF-2).
+    The loop's time goes under `retrieve`, synthesis under `generate`; the trace has the per-step split."""
+    d.llm.check_room("strong", d.cfg.agent_max_steps + 2)  # F-GRF-5: room for the worst case before any call
+    library = d.tool_library(req.doc_ids)
+
+    async def run_tool(name: str, args: dict[str, Any]) -> ToolResult:
+        return await _indexed(d, library.run, name, args)
+
+    try:
+        with t.stage("retrieve"):
+            findings = await asyncio.wait_for(
+                d.agent.run(question, run_tool, t.request_id), d.cfg.agent_timeout_s
+            )
+    except TimeoutError as exc:
+        raise LLMUnavailableError(f"the agent ran past its {d.cfg.agent_timeout_s:.0f} s limit") from exc
+    t.usage.llm_requests += findings.requests
+    t.usage.input_tokens += findings.input_tokens
+    t.usage.output_tokens += findings.output_tokens
+    t.usage.est_cost_usd += findings.shadow_usd
+    trace = findings.trace
+    passages, warnings = build_context(
+        findings.chunks, d.cfg.context_token_budget, max_passages=d.cfg.agent_context_max_passages
+    )
+    if not passages:  # F-GRF-8: nothing above the gate, so nothing to synthesize
+        refused = _refusal(req, t, NOT_FOUND, CacheInfo(enabled=False))
+        return refused.model_copy(update={"trace": trace.model_copy(update={"stop_reason": "no_evidence"})})
+    if d.observe is not None:
+        used = {p.chunk_id for p in passages}
+        d.observe(passages, [c for c in findings.chunks if c.chunk_id in used])
+    before, began = t.usage.llm_requests, time.perf_counter()
+    answer, problems = await _verified_answer(req, d, t, question, passages, None, warnings)
+    spent = t.usage.llm_requests - before
+    synthesis = AgentStep(
+        node="synthesize",
+        hits=[f"{p.doc_name} p{p.page}" if p.page is not None else p.doc_name for p in passages],
+        note=f"{len(passages)} passage(s), {len(answer.citations)} citation(s)",
+        llm_requests=spent,
+        latency_ms=int((time.perf_counter() - began) * 1000),
+    )
+    trace = trace.model_copy(
+        update={"steps": [*trace.steps, synthesis], "llm_requests": trace.llm_requests + spent}
+    )
     t.usage.latency_ms = t.latency_ms()
-    response = ChatResponse(
+    return ChatResponse(
         request_id=t.request_id,
         session_id=req.session_id,
         standalone_query=question,
         answer=answer,
-        cache=cache_info,
+        cache=CacheInfo(enabled=False),  # ADR-18: Agent mode neither reads nor writes the cache
         usage=t.usage,
-        warnings=[*warnings, *citation_warnings, *doubts],
+        warnings=[*warnings, *problems],
+        trace=trace,
     )
-    if use_cache and _storable(answer, [*citation_warnings, *doubts]):
-        d.cache.insert(
-            question,
-            np.asarray(embedding),
-            response.model_dump_json(),
-            d.namespace(),
-            cost_usd=t.usage.est_cost_usd,
-        )
-    return response
 
 
 def _request_row(
@@ -331,7 +435,9 @@ def _request_row(
         lat_rerank=latency.rerank,
         lat_generate=latency.generate,
         lat_verify=latency.verify,
-        prompt_version=load_prompt("deep_writer" if req.mode == "deep" else "answer").version,
+        prompt_version=load_prompt(
+            "deep_writer" if req.mode == "deep" else "answer"
+        ).version,  # agent: answer
         models_json=json.dumps(t.models),
         error_code=error_code,
     )
