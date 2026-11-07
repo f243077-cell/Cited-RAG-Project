@@ -3,6 +3,7 @@
 services:
   backend:
     build: .
+    image: citerag:local # one image for both services
     env_file: .env
     environment:
       DATA_DIR: /app/data
@@ -20,7 +21,7 @@ services:
       start_period: 30s
 
   frontend:
-    build: .
+    image: citerag:local
     command: ["/app/.venv/bin/streamlit", "run", "src/citerag/ui/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
     # No env_file: the UI gets the backend address and key only, never the provider keys (F-UI-6)
     environment:
