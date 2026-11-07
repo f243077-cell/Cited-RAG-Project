@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
+from citerag.agent_graph.graph import AgentGraph
 from citerag.agents.deep_mode import DeepCrew
 from citerag.agents.runtime import CrewRuntime
 from citerag.analytics.logs import LogStore
@@ -19,10 +20,12 @@ from citerag.eval.runner import RunResult, run_config, run_items, score_modes, s
 from citerag.eval.scoring import summarize
 from citerag.index.retriever import HybridRetriever
 from citerag.index.store import open_store
+from citerag.ingest.manifest import load_manifest
 from citerag.llm.gateway import OpenRouterGateway
 from citerag.rag.context import Chunk
 from citerag.rag.pipeline import Deps
 from citerag.schemas import GoldenItem, RunSummary
+from citerag.tools.library import ToolLibrary
 
 
 def _ranker(retriever: HybridRetriever, mode: str, top_k: int):
@@ -80,6 +83,10 @@ def execute_run(
                 log=log,
                 namespace=lambda: "eval",
                 deep=DeepCrew(CrewRuntime(settings, llm, log)) if mode == "deep" else None,
+                agent=AgentGraph(settings, llm) if mode == "agent" else None,
+                tool_library=lambda scope: ToolLibrary(
+                    settings, retriever, lambda: load_manifest(index_dir), scope
+                ),
             )
             result = asyncio.run(run_items(items, deps, run_dir, max_requests, skip_judge, mode))
     finally:

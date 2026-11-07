@@ -20,7 +20,7 @@ class Experiment(BaseModel):
     index_dir: Path | None = None
     retrieval: Literal["hybrid", "vector", "bm25"] = "hybrid"
     rerank: bool = False
-    mode: Literal["standard", "deep"] = "standard"
+    mode: Literal["standard", "deep", "agent"] = "standard"
 
 
 def load_experiment(path: Path) -> Experiment:

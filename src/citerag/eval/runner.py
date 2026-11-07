@@ -35,6 +35,7 @@ from citerag.schemas import ChatRequest, GoldenItem, ItemRecord, RetrievalScores
 WORST_ANSWER_REQUESTS = 3  # rewrite, generate, regenerate; a first turn has no condense
 WORST_IMAGE_REQUESTS = 5  # adds image analysis and condense
 WORST_DEEP_REQUESTS = 5  # three agent tasks, rewrite, regenerate
+WORST_AGENT_REQUESTS = 8  # six plan, act and reflect calls, synthesis, one citation retry
 _MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 _SECRETS = {"openrouter_api_key", "gemini_api_key", "citerag_api_key"}
 _FINGERPRINT = ("model_fast", "model_strong", "model_judge", "provider_strong", "provider_judge")
@@ -193,7 +194,8 @@ async def run_items(
         record = records.get(item.id)
         if record is None or record.status == "error":
             worst = WORST_IMAGE_REQUESTS if item.image_path else WORST_ANSWER_REQUESTS
-            if over_cap(WORST_DEEP_REQUESTS if mode == "deep" else worst):
+            worst = {"deep": WORST_DEEP_REQUESTS, "agent": WORST_AGENT_REQUESTS}.get(mode, worst)
+            if over_cap(worst):
                 return result("paused", f"--max-requests {max_requests} reached")
             try:
                 record = await _answer_item(item, deps, run_dir.name, mode)
