@@ -35,6 +35,10 @@ CiteRAG is two Python processes sharing a local data folder: a **FastAPI backend
 | **CrewAI** | The three Deep-mode agents and the evaluation crews | `agents/` | Run in the default answer path; use tools; return anything but a Pydantic model |
 | **Pydantic** | Every boundary contract and all settings | `schemas.py`, `config.py`, `agents/schemas.py` | Be bypassed with raw dicts |
 | **NumPy / Pandas / Matplotlib** | Cache similarity, metrics, log analysis, charts | `cache/`, `eval/`, `analytics/` | Appear inside request handlers beyond the cache lookup |
+| **LangGraph** (Phase 3, from M9) | The Agent-mode graph and the M12 supervisor | `agent_graph/` | Call a model itself; run in the standard or Deep path (ADR-15) |
+| **MCP SDK** (Phase 3, from M9) | The stdio server over the read-only tools | `mcp/` | Hold tool logic; use any transport but stdio (ADR-16) |
+
+Phase 3 adds these two rows and a framework-free `tools/` package; the design is in `docs/PHASE3_ARCHITECTURE.md`.
 
 ## 3. Tech stack and verification status
 
@@ -714,6 +718,7 @@ Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.1
 | ADR-12 | Embedded Chroma, single writer | Simplest local setup | Chroma server mode | If eval must run beside the API |
 | ADR-13 | OpenRouter free models as the LLM provider | Zero cost for a learning project; OpenAI-compatible, so LangChain and CrewAI both work unchanged; the gateway isolates the provider | Paid Anthropic or OpenAI API, local models | The free tier proves too constrained or too weak (OPEN-5); then change `base_url` and model IDs |
 | ADR-14 | Gateway-owned parsing, retries and counting instead of `with_structured_output` and SDK retries | Free models wrap or break JSON, return errors in HTTP 200, and the quota counts every attempt | LangChain structured output, SDK `max_retries` | Never, for the quota reasons |
+| ADR-15 to ADR-21 | Phase 3: LangGraph only for Agent mode, MCP only over stdio, shared framework-free tools, and more | See `docs/PHASE3_ARCHITECTURE.md` section 14 | | ADR-10 is revisited there: the standard path stays plain functions |
 
 ## 21. Gotchas found while preparing this design
 

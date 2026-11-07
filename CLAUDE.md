@@ -5,6 +5,8 @@ Built to practise RAG, vector DBs, evaluation, multimodal input, structured outp
 
 **Read first, in this order:** `docs/PRD.md` (what, requirement IDs, milestones M0 to M8) then `docs/ARCHITECTURE.md`
 (how; Appendix A holds tested reference code). If this file and those docs disagree, stop and ask.
+**Phase 3 (M9 to M12, agent mode):** `docs/PHASE3_PRD.md` then `docs/PHASE3_ARCHITECTURE.md`. They add to the two above and
+override nothing built in M0 to M8. Status: planned, not built; wait for "Build M9".
 
 ## Working agreement
 
@@ -86,7 +88,9 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 ## Architecture rules (enforced; see ARCHITECTURE sections 2 and 20)
 
 1. **Framework boundaries.** LlamaIndex only in `ingest/` and `index/`. LangChain only in `llm/`. CrewAI only in `agents/`.
-   Framework objects (`Node`, `NodeWithScore`, `AIMessage`, crew objects) never cross a boundary: convert to `Chunk`,
+   From M9 (ADR-15, ADR-16): LangGraph only in `agent_graph/`, the MCP SDK only in `mcp/`, and `tools/` imports no framework.
+   Both packages were already importable as transitive dependencies, so a test enforces this, as it does for CrewAI.
+   Framework objects (`Node`, `NodeWithScore`, `AIMessage`, crew and graph objects) never cross a boundary: convert to `Chunk`,
    Pydantic models or plain values.
 2. **One LLM gateway.** Every LLM call except CrewAI runs through `llm/gateway.py` (logs tokens, requests, shadow dollars and
    latency to `llm_calls`). The gateway parses model output itself (`llm/parse.py`) and retries itself. For CrewAI runs, reserve
@@ -203,6 +207,11 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - CrewAI takes `max_retries`, `default_headers`, `extra_body`, `base_url` and `api_key` on `LLM`, so the key need not sit in the environment.
 - **NLTK refuses hard-linked data files, and uv hard-links by default** when its cache shares a drive with the project. Chunking then crashes with `PermissionError: refusing multiply-linked file`. `[tool.uv] link-mode = "copy"` fixes it. This repo on D: never showed it; a fresh clone on C: did.
 - **The Dockerfile and compose file are untested.** The CLI is installed, but the daemon was not running in M8, so only `docker compose config` ran. The image will pull CUDA-enabled PyTorch from the lock file, so expect it to be large.
+- **`langgraph` 1.2.20 and `mcp` 1.30.0 are already installed** (via `langchain` and `crewai`), so an import works anywhere before
+  M9 adds the boundary test. Adding them as direct dependencies changes no locked version (checked on a scratch copy).
+- **FastMCP logs every request at INFO** (`Processing request of type ...`). Over stdio, stdout is the protocol: send logs to stderr.
+- Free models expire: on 2026-11-07 OpenRouter's list showed `liquid/lfm-2.5-2.6b:free` expiring on 2026-11-13, and the day before it
+  showed no expiry. Re-run `scripts/pick_free_models.py` before choosing a judge.
 - Gemini's OpenAI endpoint returns errors as a list, `[{'error': {...}}]`, not an object; the SDK status code is still right.
 
 ## Conventions
