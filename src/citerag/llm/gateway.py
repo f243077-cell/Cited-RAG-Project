@@ -24,6 +24,7 @@ from citerag.llm.errors_map import Classified, classify_error
 from citerag.llm.parse import parse_model, schema_response_format
 from citerag.llm.pricing import load_pricing
 from citerag.llm.ratelimit import SlidingWindowLimiter
+from citerag.schemas import AgentAction, ToolCall
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -57,6 +58,25 @@ class LLMGateway(Protocol):
         max_tokens: int | None = None,
         timeout_s: float | None = None,
     ) -> StructuredResult[T]: ...
+
+    async def tool_step(
+        self,
+        *,
+        role: Role,
+        system: str,
+        user: str,
+        tools: list[dict],
+        call_name: str,
+        request_id: str | None = None,
+    ) -> StructuredResult[AgentAction]: ...
+
+    def check_room(self, role: Role, n: int) -> None: ...
+
+    def action_method(self, role: Role) -> str: ...
+
+
+class _ToolsRejected(Exception):
+    """The provider refused the tools parameter: switch this model to the JSON action."""
 
 
 def provider_of(settings: Settings, role: str) -> Provider:
@@ -112,6 +132,18 @@ def _parse(schema: type[T], raw: AIMessage) -> T:
     return parse_model(schema, _text(raw))
 
 
+def _parse_action(raw: AIMessage) -> AgentAction:
+    """Native tool calls to an AgentAction. A reply with no call means the model is done."""
+    if raw.invalid_tool_calls:
+        raise ValueError(f"{len(raw.invalid_tool_calls)} malformed tool call(s)")
+    calls = [ToolCall(name=call["name"], args=call["args"]) for call in raw.tool_calls]
+    return AgentAction(calls=calls, done=not calls)
+
+
+def _function_specs(tools: list[dict]) -> list[dict]:
+    return [{"type": "function", "function": tool} for tool in tools]
+
+
 def _with_feedback(user: str | list[dict], exc: Exception) -> str | list[dict]:
     """F-STR-1: feed the error back. Error details leave out the input, so no model output is echoed."""
     detail = exc.errors(include_input=False, include_url=False) if isinstance(exc, ValidationError) else exc
@@ -141,6 +173,7 @@ class OpenRouterGateway:
         self._pricing = load_pricing()
         self._clients: dict[str, ChatOpenAI] = {}
         self._methods: dict[str, str] = {}  # per model, once one method has failed
+        self._actions: dict[str, str] = {}  # per model: "json" once native tool calls have failed
 
     async def reserve(self, provider: Provider, n: int) -> None:
         """For a crew, which calls the provider outside this class: guard first, then n limiter slots."""
@@ -153,13 +186,64 @@ class OpenRouterGateway:
             self._clients[role] = build_client(self._cfg, role)
         return self._clients[role]
 
+    def check_room(self, role: Role, n: int) -> None:
+        """Raises budget_exceeded unless n more requests fit under this role's daily guard."""
+        provider = provider_of(self._cfg, role)
+        check_budget(self._cfg.logs_db_path, self._daily_limits[provider], provider=provider, need=n)
+
+    async def tool_step(
+        self,
+        *,
+        role: Role,
+        system: str,
+        user: str,
+        tools: list[dict],
+        call_name: str,
+        request_id: str | None = None,
+    ) -> StructuredResult[AgentAction]:
+        """One ReAct step. Native tool calls first; a model whose tool calls fail switches to the JSON action, once
+        (ADR-20). `requests` counts every attempt of this step, including those spent before a switch."""
+        model = getattr(self._cfg, f"model_{role}")
+        forced = self._cfg.agent_action_method
+        native = forced == "tools" or (forced == "auto" and self._actions.get(model) != "json")
+        before = self._log.llm_calls_for(request_id) if request_id else 0
+        common = {"role": role, "schema": AgentAction, "system": system, "call_name": call_name}
+        result = None
+        if native:
+            try:
+                result = await self.structured_call(**common, user=user, request_id=request_id, tools=tools)
+            except (StructuredOutputError, _ToolsRejected) as exc:
+                if forced == "tools":
+                    raise StructuredOutputError(f"{model} gave no usable tool call ({call_name})") from exc
+                self._actions[model] = "json"
+                logger.info("%s: native tool calls failed; switching to the JSON action", model)
+        if result is None:
+            result = await self.structured_call(**common, user=user, request_id=request_id)
+        if request_id:
+            result = result.model_copy(update={"requests": self._log.llm_calls_for(request_id) - before})
+        return result
+
+    def action_method(self, role: Role) -> str:
+        model = getattr(self._cfg, f"model_{role}")
+        if self._cfg.agent_action_method != "auto":
+            return self._cfg.agent_action_method
+        return self._actions.get(model, "tools")
+
     def _bind(
-        self, role: str, schema: type[BaseModel], method: str, max_tokens: int, timeout_s: float | None
+        self,
+        role: str,
+        schema: type[BaseModel],
+        method: str,
+        max_tokens: int,
+        timeout_s: float | None,
+        tools: list[dict] | None = None,
     ) -> Runnable[LanguageModelInput, AIMessage]:
         llm = self._client(role)
         limits: dict[str, float] = {"max_tokens": max_tokens}
         if timeout_s is not None:
             limits["timeout"] = timeout_s
+        if tools is not None:
+            return llm.bind_tools(_function_specs(tools), tool_choice="auto", **limits)
         if method == "tools":
             return llm.bind_tools([schema], tool_choice=schema.__name__, **limits)
         return llm.bind(response_format=schema_response_format(schema), **limits)
@@ -212,8 +296,10 @@ class OpenRouterGateway:
         request_id: str | None = None,
         max_tokens: int | None = None,
         timeout_s: float | None = None,
+        tools: list[dict] | None = None,
     ) -> StructuredResult[T]:
-        """timeout_s caps the whole call, retries and waits included, not each attempt."""
+        """timeout_s caps the whole call, retries and waits included, not each attempt. With `tools`, the reply is
+        native tool calls parsed into an AgentAction; tool_step is the caller."""
         requested = getattr(self._cfg, f"model_{role}")
         provider = provider_of(self._cfg, role)
         self._client(role)  # a missing key fails here, before anything is logged as an attempt
@@ -255,7 +341,7 @@ class OpenRouterGateway:
                     raise LLMUnavailableError(f"{requested} used its {timeout_s:.0f} s limit ({call_name})")
                 left = min(left, attempt_limit)
             try:
-                raw = await self._bind(role, schema, method, limit, left).ainvoke(messages)
+                raw = await self._bind(role, schema, method, limit, left, tools).ainvoke(messages)
             except Exception as exc:
                 seen = classify_error(exc)
                 last_kind = (
@@ -265,6 +351,8 @@ class OpenRouterGateway:
                     last_kind = f"unknown:{type(exc).__name__}"
                     logger.warning("%s: unclassified %s from %s", call_name, type(exc).__name__, requested)
                 record(attempt, began, requested, False, http_status=seen.http_status, error_kind=last_kind)
+                if tools is not None and seen.kind == "bad_request":
+                    raise _ToolsRejected(str(seen.http_status)) from exc
                 if provider == "gemini" and (seen.kind == "timeout" or seen.http_status == 504):
                     # every attempt counts against a small daily quota, and a hang rarely clears in seconds
                     raise LLMUnavailableError(f"{requested} timed out; not retried") from exc
@@ -285,7 +373,7 @@ class OpenRouterGateway:
             shadow_usd += cost
             counts = {"input_tokens": tokens_in, "output_tokens": tokens_out, "shadow_usd": cost}
             try:
-                parsed = _parse(schema, raw)
+                parsed = _parse_action(raw) if tools is not None else _parse(schema, raw)
             except (ValidationError, ValueError) as exc:
                 record(attempt, began, served, False, http_status=200, error_kind="parse", **counts)
                 last_kind = "parse"
@@ -296,7 +384,8 @@ class OpenRouterGateway:
                 parse_failures += 1
                 if parse_failures >= 2:
                     break
-                self._switch_method(requested)
+                if tools is None:  # a bad native tool call says nothing about this model's structured output
+                    self._switch_method(requested)
                 content = _with_feedback(user, exc)
                 continue
 
