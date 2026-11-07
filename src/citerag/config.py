@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     agent_timeout_s: float = 240
     agent_context_max_passages: int = 8
     agent_action_method: Literal["auto", "tools", "json"] = "auto"
+    agent_architecture: Literal["single", "supervisor"] = "single"  # supervisor: the M12 team, for comparison
     agent_tool_result_chars: int = 6000  # per tool call: hits are cut to this many characters
     mcp_mode: Literal["api", "local"] = "api"  # api: call the backend over HTTP; local: open the index here
     crewai_disable_telemetry: bool = True

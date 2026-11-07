@@ -79,6 +79,8 @@ class ToolRunnerLike(Protocol):
 
 
 class AgentRunner(Protocol):
+    def worst_requests(self) -> int: ...
+
     async def run(
         self, question: str, run_tool: Callable[[str, dict[str, Any]], Awaitable[ToolResult]], request_id: str
     ) -> AgentFindings: ...
@@ -356,7 +358,7 @@ async def _verified_answer(
 async def _answer_agent(req: ChatRequest, d: Deps, t: _Trace, question: str) -> ChatResponse:
     """Agent mode: the graph gathers evidence, then the standard generate-and-verify path answers (F-GRF-2).
     The loop's time goes under `retrieve`, synthesis under `generate`; the trace has the per-step split."""
-    d.llm.check_room("strong", d.cfg.agent_max_steps + 2)  # F-GRF-5: room for the worst case before any call
+    d.llm.check_room("strong", d.agent.worst_requests())  # F-GRF-5: room for the worst case before any call
     library = d.tool_library(req.doc_ids)
 
     async def run_tool(name: str, args: dict[str, Any]) -> ToolResult:

@@ -92,7 +92,7 @@ class ChatRequest(BaseModel):
 
 
 class AgentStep(BaseModel):
-    node: Literal["plan", "act", "tools", "reflect", "synthesize"]
+    node: Literal["plan", "act", "tools", "reflect", "synthesize", "supervise"]
     tool: str | None = None
     args: dict[str, Any] | None = None  # validated arguments only; a query is model text, shown as plain text
     hits: list[str] = Field(default_factory=list)  # "doc p3" references, never passage text
@@ -352,3 +352,8 @@ class Reflection(BaseModel):
     next_queries: list[str] = Field(
         default_factory=list, max_length=3, description="What to search next, if anything"
     )
+
+
+class Route(BaseModel):  # the M12 supervisor's handoff
+    action: Literal["research", "answer"]
+    task: str = Field(default="", max_length=500, description="For research: one short, specific task")

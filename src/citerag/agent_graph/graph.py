@@ -52,6 +52,10 @@ class AgentGraph:
     def __init__(self, settings: Settings, llm: LLMGateway) -> None:
         self._cfg, self._llm = settings, llm
 
+    def worst_requests(self) -> int:
+        """Plan, act and reflect calls, then synthesis and one citation retry."""
+        return self._cfg.agent_max_steps + 2
+
     # -- what the model sees ---------------------------------------------------------------------
     def _evidence(self, state: AgentState) -> str:
         chunks = [to_chunk(hit) for hit in state.hits.values()]
