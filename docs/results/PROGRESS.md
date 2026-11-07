@@ -9,7 +9,8 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 | M8 polish | built and pushed; Docker untested; a live first answer not run |
 | Phase 3 M9 tools and MCP | built and pushed; 0 LLM requests |
 | Phase 3 M10 agent graph and Agent mode | built and pushed; 3 LLM requests (tool-calling spike) |
-| Phase 3 M11 and M12 | in progress (Coder delegated decisions on 2026-11-07: see PHASE3_PRD section 10) |
+| Phase 3 M11 evaluation E8 | built and pushed; the live E8 run waits for the verified golden set |
+| Phase 3 M12 | in progress (Coder delegated decisions on 2026-11-07: see PHASE3_PRD section 10) |
 
 ## M6
 
@@ -60,3 +61,12 @@ page, `mode: agent` in experiment files, `M10_test_guide.md`.
 
 **Docker (M8), checked in passing:** the image builds (21 GB). The backend first failed on an `env_file` parsing gotcha, now fixed in
 `.env.example`, and in `.env` by moving two comments without changing a value. Both services now share one image.
+
+## Phase 3: M11
+
+**Done:** `e8_standard.yaml`, `e8_deep.yaml`, `e8_agent.yaml`; `eval/modes.py` (context coverage on what reached the answer, canary
+check on tool arguments, request estimate, the E8 table); `citerag eval run --estimate`; `citerag eval report-e8`;
+`ItemRecord.trace`; the tool-hijack fixture `eval/fixtures/poisoned/agent_research_memo.md` (no golden item: that is yours);
+a no-network rehearsal of all three modes; `M11_test_guide.md`.
+
+**Not done:** the live E8 run. It needs the verified golden set and about 405 requests for all three modes.

@@ -53,6 +53,8 @@ uv run citerag eval gate <run_id>   # MIN_TOP_SIMILARITY sweep; a proposal, it c
 uv run citerag eval parts --index-dir data/index_eval   # multi_chunk: hybrid rank of each gold part, zero LLM requests
 uv run citerag ingest data/sample --config configs/experiments/e1_chunk_256.yaml   # build an experiment index
 uv run pytest tests/integration/test_agent_mode.py   # Agent mode on FakeGateway and the fake server, zero LLM requests
+uv run citerag eval run --golden F --config configs/experiments/e8_agent.yaml --skip-type image --estimate   # E8 cost, no request
+uv run citerag eval report-e8 <standard_run> <deep_run> <agent_run>   # E8 table and chart, zero LLM requests
 uv run citerag mcp                        # MCP server over stdio; calls the running API (add --local with the API stopped)
 uv run citerag quota                      # requests in the last 24 hours against each guard, zero LLM requests
 uv run citerag logs purge --days 30       # delete old log rows

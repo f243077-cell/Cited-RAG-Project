@@ -265,11 +265,12 @@ the served model, and add the result to the gotchas.
 
 - **Configs:** `configs/experiments/e8_standard.yaml`, `e8_deep.yaml`, `e8_agent.yaml`. `Experiment.mode` gains `"agent"`.
 - **Runner:** `WORST_AGENT_REQUESTS = 8` for `--max-requests`. The agent passes the chunks that reached synthesis to `Deps.observe`,
-  so `ItemRecord.retrieved` means "what the generator saw" in every mode, and no eval schema changes.
+  so `ItemRecord.retrieved` means "what the generator saw" in every mode. `ItemRecord.trace` (optional, added in M11) keeps the
+  agent trace, so tool arguments can be checked for canaries. Agent runs leave image items out.
 - **Context coverage:** `full_coverage_at_k(retrieved, gold, k=len(retrieved))` per `multi_chunk` item, reported next to the offline
   hybrid figure. It is computed from `items.jsonl` by the E8 report, not stored in `RunSummary`.
-- **Compare:** `citerag eval compare` takes two or more runs. A new `citerag eval report-e8 RUN...` writes `docs/results/E8_modes.md`
-  and one chart (grouped bars, one scale per panel).
+- **Report:** `citerag eval report-e8 RUN...` writes `docs/results/E8_modes.md` and `e8_modes.png` for any number of runs, so
+  `eval compare` stays the two-run delta table. `citerag eval run --estimate` prints the request estimate per mode and stops.
 - **Commands, run only on approval:**
 
 ```bash
