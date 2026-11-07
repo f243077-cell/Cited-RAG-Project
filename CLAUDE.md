@@ -58,6 +58,8 @@ uv run citerag eval run --golden F --config configs/experiments/e8_agent.yaml --
 uv run citerag eval report-e8 <standard_run> <deep_run> <agent_run>   # E8 table and chart, zero LLM requests
 uv run citerag eval report-e8 <single> <supervisor> <deep> --title "M12: single agent vs supervisor vs Deep" --out docs/results/M12_multi_agent.md
 uv run citerag mcp                        # MCP server over stdio; calls the running API (add --local with the API stopped)
+uv run python scripts/check_release.py     # leakage, attribution and schema checks; run before every commit
+uv run python scripts/accept_golden.py --ids a-001,a-002   # the owner only: move reviewed items into golden.jsonl as verified
 uv run citerag quota                      # requests in the last 24 hours against each guard, zero LLM requests
 uv run citerag logs purge --days 30       # delete old log rows
 docker compose config                     # checks the compose file; the images are untested (M8)
@@ -153,7 +155,8 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
   `:free` suffix) all show price 0. `scripts/pick_free_models.py` filters them.
 - **A whole-document gold source flatters its rank.** `m-004` part 0 ranks 2 on a chunk with no installer text; the chunk that holds it ranks 4.
 - **Parts follow pages, but content does not.** SSDF p26 holds RV.1.3 and RV.2, and p27 holds RV.2.2 and RV.3, so `m-005` splits by page only.
-- `review_golden.py` compares terms by their first 5 characters, so 800-61r2 and 800-61r3 look identical in a marked sentence.
+- `review_golden.py` compares plain words by their first 5 characters, but identifiers with a digit stay whole (fixed at the wind-up:
+  800-61r2 and 800-61r3 had looked identical).
 - **The relevance gate cannot catch on-topic questions the documents do not answer.** Near-miss unanswerables scored cosine 0.65 to
   0.77 against 0.70 to 0.88 for answerable items, so refusing them is the model's job. `MIN_TOP_SIMILARITY` is provisionally 0.55 and is recalibrated after the verified set.
 - Golden `page` is the stored PDF position from 1 (pypdf), never the printed number; `doc` must equal the stored `doc_name` exactly.
@@ -198,6 +201,10 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - Gemini limits are per project and per model, requests per day reset at midnight Pacific, and free-tier numbers appear only in
   AI Studio. Google marks free-tier content as used to improve its products. The guard counts a rolling 24 hours, not Google's reset.
 - **`SemanticCache` defines `__len__`, so an empty cache is falsy.** `cache or NoOpCache()` silently replaced it, and uploads stopped invalidating. Compare with `None`.
+- **The cache is off by default since the wind-up** (`CACHE_ENABLED=false`), and warns at start, on `/health` and on the home page
+  whenever it runs on a threshold that no labelled sweep recommended. Tests turn it on in `tests/conftest.py`.
+- **A missing setting is one clear line, not a stack trace:** the API answers 503 everywhere with the reason; the CLI (`citerag.cli:run`)
+  exits 2. Starlette prints a traceback for any exception raised in a lifespan, so the API does not exit.
 - **The placeholder `CACHE_THRESHOLD` of 0.92 is not safe.** On the 80 candidate pairs with the drafter's proposed labels (a smoke run, not a result), 14 of 43 near misses reached 0.92 and passed the guard. bge-small puts "How many hours..." and "How many days..." at 0.97.
 - **`guard_ok` sees digits and a short word list only:** "first" vs "second", "days" vs "hours" and "leave out" all pass it. Only the threshold stops those.
 - A request with `doc_ids` bypasses the cache: a stored answer may cite documents outside the filter.
