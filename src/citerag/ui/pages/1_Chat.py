@@ -30,11 +30,18 @@ with st.sidebar:
     use_cache = st.toggle(
         "Use cache", value=True, help="Off skips the cache for this question: no lookup and nothing stored."
     )
-    deep_mode = st.toggle(
-        "Deep mode", value=False, help="Three agents check the answer. Slower, and it skips the cache."
+    mode = st.radio(
+        "Mode",
+        ["Standard", "Deep", "Agent"],
+        horizontal=True,
+        help="Deep: three agents check the answer. Agent: plans, searches the documents with tools, then answers.",
     )
-    if deep_mode:
+    if mode == "Deep":
         st.caption("Deep mode costs at least 3 LLM requests per question, against 1 for standard.")
+    if mode == "Agent":
+        st.caption(
+            "Agent mode costs 4 LLM requests usually and at most 8. It skips the cache and takes no images."
+        )
     if st.button("New chat"):
         try:
             client.delete_session(state.session_id)
@@ -75,7 +82,7 @@ if submitted:
         message=question,
         doc_ids=selected or None,
         use_cache=use_cache,
-        mode="deep" if deep_mode else "standard",
+        mode=mode.lower(),
         **image_fields,
     )
     with st.chat_message("assistant"):

@@ -357,13 +357,41 @@ def test_a_cached_answer_shows_the_badge_with_its_similarity(monkeypatch):
     )
 
 
-def test_deep_mode_is_off_by_default_warns_of_the_cost_and_is_sent(monkeypatch):
+def test_the_mode_is_standard_by_default_warns_of_the_cost_and_is_sent(monkeypatch):
     client = StubClient(response())
     app = run_page(monkeypatch, "1_Chat.py", client)
-    assert app.toggle[1].label == "Deep mode" and app.toggle[1].value is False
+    assert app.radio[0].label == "Mode" and app.radio[0].value == "Standard"
     app.chat_input[0].set_value("q").run()
     assert client.requests[-1].mode == "standard"
-    app.toggle[1].set_value(True).run()
+    app.radio[0].set_value("Deep").run()
     assert any("at least 3 LLM requests" in c.value for c in app.caption)
     app.chat_input[0].set_value("r").run()
     assert client.requests[-1].mode == "deep"
+    app.radio[0].set_value("Agent").run()
+    assert any("at most 8" in c.value for c in app.caption)
+    app.chat_input[0].set_value("s").run()
+    assert client.requests[-1].mode == "agent"
+
+
+def test_an_agent_answer_shows_its_trace_as_plain_text(monkeypatch):
+    from citerag.schemas import AgentStep, AgentTrace
+
+    reply = response()
+    reply.trace = AgentTrace(
+        sub_questions=["What are the *tiers*?"],
+        steps=[
+            AgentStep(node="plan", note="1 sub-question(s)", llm_requests=1),
+            AgentStep(
+                node="tools", tool="search_documents", args={"query": "<b>tiers</b>"}, hits=["csf.pdf p8"]
+            ),
+            AgentStep(node="synthesize", llm_requests=1),
+        ],
+        stop_reason="enough",
+        llm_requests=2,
+    )
+    app = run_page(monkeypatch, "1_Chat.py", StubClient(reply))
+    app.chat_input[0].set_value("q").run()
+    assert app.expander[-1].label == "Agent trace · 3 steps · 2 LLM requests"
+    texts = [t.value for t in app.text]
+    assert "1. What are the *tiers*?" in texts
+    assert any("search_documents(query='<b>tiers</b>')" in t and "[csf.pdf p8]" in t for t in texts)
