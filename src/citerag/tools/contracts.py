@@ -46,6 +46,7 @@ class ToolHit(BaseModel):
     kind: Literal["text", "image"] = "text"
     text: str  # untrusted document text: reaches a model only through render_passages
     score: float | None = None
+    image_path: str | None = None
 
 
 class ToolResult(BaseModel):
@@ -57,3 +58,24 @@ class ToolResult(BaseModel):
     documents: list[DocumentInfo] = Field(default_factory=list)
     top_similarity: float | None = None  # search only: the relevance-gate value
     truncated: bool = False
+
+
+DESCRIPTIONS: dict[ToolName, str] = {
+    "list_documents": "List the documents in the library.",
+    "search_documents": "Search the documents. Returns passages, or none when nothing is relevant.",
+    "read_page": "Read the stored text of one page of one document.",
+}
+
+
+ACT_TOOLS: tuple[ToolName, ...] = (
+    "search_documents",
+    "read_page",
+)  # list_documents distracted the model in the M10 spike
+
+
+def tool_specs(names: tuple[ToolName, ...] = TOOL_NAMES) -> list[dict]:
+    """Plain JSON schemas for the model, so no framework type crosses into llm/."""
+    return [
+        {"name": name, "description": DESCRIPTIONS[name], "parameters": ARGS[name].model_json_schema()}
+        for name in names
+    ]

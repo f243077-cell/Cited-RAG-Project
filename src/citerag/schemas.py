@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -80,7 +80,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     image_b64: str | None = Field(default=None, max_length=7_000_000)  # about 5 MB decoded
     image_media_type: Literal["image/png", "image/jpeg", "image/webp"] | None = None
-    mode: Literal["standard", "deep"] = "standard"
+    mode: Literal["standard", "deep", "agent"] = "standard"
     use_cache: bool = True
     doc_ids: list[str] | None = None  # restrict retrieval to these documents
 
@@ -91,6 +91,24 @@ class ChatRequest(BaseModel):
         return self
 
 
+class AgentStep(BaseModel):
+    node: Literal["plan", "act", "tools", "reflect", "synthesize"]
+    tool: str | None = None
+    args: dict[str, Any] | None = None  # validated arguments only; a query is model text, shown as plain text
+    hits: list[str] = Field(default_factory=list)  # "doc p3" references, never passage text
+    note: str = ""  # written by code, not by the model
+    llm_requests: int = 0
+    latency_ms: int = 0
+
+
+class AgentTrace(BaseModel):
+    sub_questions: list[str] = Field(default_factory=list)
+    steps: list[AgentStep] = Field(default_factory=list)
+    stop_reason: str = ""
+    llm_requests: int = 0
+    method: Literal["tools", "json"] = "tools"
+
+
 class ChatResponse(BaseModel):
     request_id: str
     session_id: str
@@ -99,6 +117,7 @@ class ChatResponse(BaseModel):
     cache: CacheInfo
     usage: UsageInfo
     warnings: list[str] = Field(default_factory=list)
+    trace: AgentTrace | None = None  # Agent mode only (Phase 3)
 
 
 class Message(BaseModel):
@@ -305,3 +324,30 @@ class RunSummary(BaseModel):
 class RunDetail(BaseModel):
     summary: RunSummary
     items: list[ItemRecord]
+
+
+# ---- 5. Agent mode (Phase 3): what the planner, the act step and reflection may produce ----------
+AgentToolName = Literal["list_documents", "search_documents", "read_page"]
+
+
+class Plan(BaseModel):
+    sub_questions: list[str] = Field(
+        min_length=1, max_length=3, description="1 to 3 questions that together answer it"
+    )
+
+
+class ToolCall(BaseModel):
+    name: AgentToolName
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentAction(BaseModel):
+    calls: list[ToolCall] = Field(default_factory=list, max_length=3)
+    done: bool = Field(default=False, description="True when no more searching is needed")
+
+
+class Reflection(BaseModel):
+    enough: list[bool] = Field(description="One per sub-question: does the evidence answer it?")
+    next_queries: list[str] = Field(
+        default_factory=list, max_length=3, description="What to search next, if anything"
+    )

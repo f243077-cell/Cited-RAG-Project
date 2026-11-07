@@ -57,6 +57,7 @@ def _hit(chunk: Chunk) -> ToolHit:
         kind=kind,
         text=chunk.text,
         score=chunk.score or None,
+        image_path=chunk.image_path,
     )
 
 
