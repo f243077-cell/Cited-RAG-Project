@@ -308,6 +308,24 @@ def eval_gate(run_id: str) -> None:
 
 
 @app.command()
+def mcp(
+    local: Annotated[bool, typer.Option(help="Open the index here; the API must be stopped")] = False,
+    index_dir: Annotated[Path | None, typer.Option(help="With --local. Default: DATA_DIR/index")] = None,
+) -> None:
+    """MCP server over stdio with three read-only tools. stdout carries only the protocol."""
+    from citerag.mcp_server.server import HttpBackend, LocalBackend, build_server, quiet_logging
+
+    quiet_logging()
+    settings = get_settings()
+    if local or settings.mcp_mode == "local":
+        backend = LocalBackend(settings, index_dir or settings.index_dir)
+    else:
+        key = settings.citerag_api_key.get_secret_value() if settings.citerag_api_key else None
+        backend = HttpBackend(settings.api_base_url, key)
+    build_server(backend).run("stdio")
+
+
+@app.command()
 def quota() -> None:
     """LLM requests in the last 24 hours against each daily guard. Reads the local log: zero LLM requests."""
     from citerag.llm.budget import requests_last_24h
