@@ -48,13 +48,14 @@ fails if `langgraph` is imported outside `agent_graph/` or `mcp` outside `mcp_se
 ```mermaid
 flowchart TD
   IN["ChatRequest mode=agent"] --> PRE["pipeline: empty-index check, condense if follow-up, guard needs 8"]
-  PRE --> PLAN["plan: 1 to 3 sub-questions (LLM)"]
-  PLAN --> ACT["act: one ReAct step, choose tool calls (LLM)"]
-  ACT -- "tool calls" --> TOOLS["tools: run, validate, cap, gate (no LLM)"]
+  PRE --> PLAN["plan: 1 to 3 sub-questions (LLM); code queues one search per sub-question"]
+  PLAN --> TOOLS["tools: run, validate, cap, gate (no LLM)"]
+  ACT["act: one ReAct step, choose tool calls (LLM)"] -- "tool calls" --> TOOLS
   ACT -- "no call, or steps used up" --> SYN
   TOOLS -- "steps left" --> REF["reflect: evidence enough per sub-question? (LLM)"]
   TOOLS -- "steps used up" --> SYN
   REF -- "more, and steps left" --> ACT
+  ACT -- "no call" --> SYN
   REF -- "enough, or steps used up" --> SYN
   SYN{"any passage above the gate?"}
   SYN -- no --> NF["refusal: not found (no LLM)"]
@@ -63,22 +64,29 @@ flowchart TD
   NF --> OUT
 ```
 
-**Planner-executor with ReAct and reflection.** `plan` decomposes the question once. `act` is one ReAct step: it sees the question,
-the sub-questions and the evidence so far, and either calls tools (up to one per sub-question, in one step) or stops. `tools` runs
-the calls without a model. `reflect` grades the evidence per sub-question and either stops or names what to search next. The loop
-runs `act`, `tools`, `reflect` until reflection says enough or the step budget runs out.
+**Planner-executor with ReAct and reflection.** `plan` decomposes the question once, and code then searches each sub-question
+(planner-executor). `reflect` grades the evidence per sub-question and either stops or names what to search next. Only then does
+`act`, one ReAct step, choose tool calls (`search_documents` or `read_page`, up to one per sub-question) or stop. The loop runs
+`reflect`, `act`, `tools` until reflection says enough, `act` calls nothing, or the step budget runs out.
+
+**Why the first search is code, not the model (M10 spike, 2026-11-07, 3 live requests on `nemotron-3.5-super-vl:free`).** Native
+tool calls worked mechanically: valid arguments in 1.1 to 4.9 s. The choices were poor, though. Asked a two-part question with no
+evidence, the model called `list_documents` instead of searching. Given evidence that answered both parts, it called
+`list_documents` again instead of stopping. The JSON action came back empty. So the plan's sub-questions are searched by code, the
+act step is offered only `search_documents` and `read_page`, and the document names go into its prompt.
 
 **Each act step is stateless (ADR-20).** The step gets a fresh prompt with the evidence so far, rendered by `render_passages`, not
 a growing list of LangChain tool messages. That keeps LangChain objects inside `llm/`, makes native tool calling and the JSON
 fallback use the same prompt, and keeps the prompt within `CONTEXT_TOKEN_BUDGET`.
 
-**Requests per question.** Plan 1, act 1, reflect 1, synthesize 1: **4**. One more round adds act and reflect: **6**.
-`AGENT_MAX_STEPS=6` caps plan, act and reflect together, so the third act is the last LLM step before synthesis. Synthesis plus
-its one citation retry brings the worst case to **8**, and a follow-up's condense step to 9. Each failed HTTP attempt inside a call
-adds 1, and the guard counts it.
+**Requests per question.** Plan 1, reflect 1, synthesize 1: **3**. One more round adds act and reflect: **5**.
+`AGENT_MAX_STEPS=6` caps plan, act and reflect together: plan, reflect, act, reflect, act, reflect. Synthesis plus its one citation
+retry brings the worst case to **8**, and a follow-up's condense step to 9. Each failed HTTP attempt inside a call adds 1, and the
+guard counts it.
 
 **Routing is plain Python** (`routing.py`): pure functions of the state, unit-tested without LangGraph. LangGraph's
-`recursion_limit` (`AGENT_RECURSION_LIMIT=25`) only catches a routing bug. The worst legal path visits 10 nodes.
+`recursion_limit` (`AGENT_RECURSION_LIMIT=25`) only catches a routing bug. The worst legal path visits 10 nodes: plan, tools,
+reflect, act, tools, reflect, act, tools, reflect, end.
 
 ## 4. State
 
@@ -92,7 +100,8 @@ Pydantic model in `agent_graph/state.py`. LangGraph accepts Pydantic state, and 
 | `sub_questions` | `list[str]` | 1 to `AGENT_MAX_SUBQUESTIONS` |
 | `hits` | `dict[str, ToolHit]` | By `chunk_id`, deduplicated, in the order found |
 | `evidence` | `dict[int, list[str]]` | Sub-question index to the `chunk_id`s that reflection judged useful |
-| `pending` | `list[ToolCall]` | Calls chosen by `act`, run by `tools` |
+| `documents` | `list[str]` | Library names, listed by code once, for the act prompt |
+| `pending` | `list[ToolCall]` | The plan's searches, then calls chosen by `act`; run by `tools` |
 | `next_queries` | `list[str]` | Reflection's suggestions for the next `act` |
 | `steps_used` | `int` | LLM calls of plan, act and reflect |
 | `trace` | `AgentTrace` | Built as the graph runs |
@@ -183,8 +192,9 @@ class AgentTrace(BaseModel):
 `LLMGateway.tool_step(role, system, user, tools: list[type[BaseModel]], request_id) -> StructuredResult[AgentAction]` is new.
 `FakeGateway` gets the same method.
 
-1. **Native:** `ChatOpenAI.bind_tools([...], tool_choice="auto")` with one schema per tool. `raw.tool_calls` becomes an
-   `AgentAction`; no tool call means `done=True`.
+1. **Native:** `ChatOpenAI.bind_tools([...], tool_choice="auto")` with one function spec per tool, built from plain JSON schemas
+   (`tools.contracts.tool_specs`). `raw.tool_calls` becomes an `AgentAction`; no tool call means `done=True`. A bad native tool
+   call never switches the model's structured-output method for other schemas.
 2. **Fallback:** if the reply has malformed tool calls, or a 400 names `tools` or `tool_choice`, the gateway switches that model to
    `structured_call(AgentAction)` with `parse_model`. That is the same "switch once per model" rule as json_schema to tools today
    (ADR-14), and it is logged. `AGENT_ACTION_METHOD=auto|tools|json` can force either path.
@@ -238,7 +248,9 @@ Logging is set to stderr before the server starts. An example MCP client configu
 
 ## 10. Tool-calling model and how it will be checked
 
-Proposal: `nvidia/nemotron-3.5-super-vl:free` for `act` (decision 6). In M10, only on the owner's go:
+Chosen: `nvidia/nemotron-3.5-super-vl:free` for `act` (decision 6). The M10 spike below ran on 2026-11-07 with retries off, 3
+requests in total. Results: 1 passed mechanically but chose `list_documents`; 2 failed (it did not stop); 3 returned an empty
+action. Native tool calls stay the default (`AGENT_ACTION_METHOD=auto`), with the design changes in section 3.
 
 | # | Request | Pass |
 |---|---|---|

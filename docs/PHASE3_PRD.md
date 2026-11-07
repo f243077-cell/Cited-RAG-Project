@@ -72,16 +72,17 @@ evaluation), F-SUP (supervisor), F-DEV (AI-assisted development), NF-P3.
 
 ### 5.3 Agent graph (M10)
 
-- **F-GRF-1 [MUST]** A LangGraph `StateGraph` with these nodes: `plan` (at most `AGENT_MAX_SUBQUESTIONS` sub-questions, default 3),
-  `act` (one ReAct step: choose tool calls), `tools` (run them, no LLM), `reflect` (is the evidence enough for each sub-question:
-  stop, or one more search) and `synthesize`.
+- **F-GRF-1 [MUST]** A LangGraph `StateGraph` with these nodes: `plan` (at most `AGENT_MAX_SUBQUESTIONS` sub-questions, default 3;
+  code then searches each one), `tools` (run calls, no LLM), `reflect` (is the evidence enough for each sub-question: stop, or one
+  more search), `act` (one ReAct step: choose tool calls) and `synthesize`.
 - **F-GRF-2 [MUST]** `synthesize` uses the existing path: `build_context`, `generate` with the `answer` prompt, `verify_citations`,
   and one corrective retry. The result is the same `CitedAnswer` as in standard mode.
 - **F-GRF-3 [MUST]** Every LLM call in the graph goes through the gateway, so it counts in `llm_calls`, the limiter and the daily
   guard. The graph never builds its own LLM client.
 - **F-GRF-4 [MUST]** Limits: `AGENT_MAX_STEPS` (default 6) counts the LLM calls of plan, act and reflect. When the count is reached,
   the graph goes to `synthesize` with what it has. LangGraph's `recursion_limit` (default 25) is a second stop, and
-  `AGENT_TIMEOUT_S` (default 240) caps the whole request. The worst case is 8 LLM calls, 9 with a follow-up's condense step.
+  `AGENT_TIMEOUT_S` (default 240) caps the whole request. A typical question costs 3 LLM calls, 5 with one more round; the worst
+  case is 8, 9 with a follow-up's condense step.
 - **F-GRF-5 [MUST]** Before the graph starts, the daily guard must have room for the worst case of 8; otherwise the API returns 429
   `budget_exceeded`.
 - **F-GRF-6 [MUST]** Native tool calling first. If the model does not return a valid tool call, the gateway falls back, once per
@@ -125,7 +126,7 @@ evaluation), F-SUP (supervisor), F-DEV (AI-assisted development), NF-P3.
 | ID | Requirement |
 |---|---|
 | NF-P3-1 | **Framework boundaries:** LangGraph only in `agent_graph/`, the MCP SDK only in `mcp_server/`, tools framework-free in `tools/`. A test enforces it, as it does for CrewAI |
-| NF-P3-2 | **Quota:** typical agent question 4 LLM requests, 6 with one more search round, at most 8 (9 for a follow-up). Each failed HTTP attempt adds to that, and the guard counts it |
+| NF-P3-2 | **Quota:** typical agent question 3 LLM requests, 5 with one more search round, at most 8 (9 for a follow-up). Each failed HTTP attempt adds to that, and the guard counts it |
 | NF-P3-3 | **Latency:** agent p50 at most 3 times standard p50 on E8. Record the real figure, as M3 did for standard |
 | NF-P3-4 | **Testability:** the default `pytest` makes no network call. The graph runs on `FakeGateway`, MCP on the in-process client, and native tool calls on the fake OpenAI server |
 | NF-P3-5 | **Safety:** read-only tools, validated arguments, capped results, escaped passages, step and time limits, and no new outbound network path |
@@ -160,12 +161,12 @@ listed separately and run only on the owner's go.
 
 | Activity | LLM requests |
 |---|---|
-| Agent question: plan, act, reflect, synthesize | 4 typical |
-| With one more search round (act and reflect again) | 6 |
+| Agent question: plan, reflect, synthesize (the plan's searches are code) | 3 typical |
+| With one more search round (act and reflect again) | 5 |
 | Hard cap: 6 plan, act and reflect calls, synthesize, one citation retry | 8 |
 | Follow-up question (condense) | +1 |
 | Each failed HTTP attempt inside any call | +1, counted by the guard |
-| M10 tool-calling spike | at most 3 |
+| M10 tool-calling spike | 3, spent on 2026-11-07 |
 | M10 first live agent question | at most 8 |
 
 **E8 on 38 non-image items** (26 answerable or `multi_chunk` with judge, 7 unanswerable, 5 injection), if the verified set keeps
@@ -175,11 +176,11 @@ today's mix:
 |---|---|---|
 | Standard | about 71 | 140 |
 | Deep | about 156 | 216 |
-| Agent | about 216 | 330 |
-| All three | about 443 | 686 |
+| Agent | about 178 | 330 |
+| All three | about 405 | 686 |
 
-If the E7 standard and Deep runs used the same verified set and settings, E8 adds only the agent run, about 216 requests. At a
-30-a-day cap that is about 8 days for the agent run, or about 15 for all three. With credits (OPEN-5, 1,000 a day) it fits in one
+If the E7 standard and Deep runs used the same verified set and settings, E8 adds only the agent run, about 178 requests. At a
+30-a-day cap that is about 6 days for the agent run, or about 14 for all three. With credits (OPEN-5, 1,000 a day) it fits in one
 day. A sample with `--limit 10` costs about 120 for all three modes.
 
 ## 10. Decisions

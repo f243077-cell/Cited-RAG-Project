@@ -52,6 +52,7 @@ uv run citerag eval compare <run_a> <run_b>   # delta table; under 3 points is n
 uv run citerag eval gate <run_id>   # MIN_TOP_SIMILARITY sweep; a proposal, it changes nothing
 uv run citerag eval parts --index-dir data/index_eval   # multi_chunk: hybrid rank of each gold part, zero LLM requests
 uv run citerag ingest data/sample --config configs/experiments/e1_chunk_256.yaml   # build an experiment index
+uv run pytest tests/integration/test_agent_mode.py   # Agent mode on FakeGateway and the fake server, zero LLM requests
 uv run citerag mcp                        # MCP server over stdio; calls the running API (add --local with the API stopped)
 uv run citerag quota                      # requests in the last 24 hours against each guard, zero LLM requests
 uv run citerag logs purge --days 30       # delete old log rows
@@ -210,6 +211,14 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - **The Dockerfile and compose file are untested.** The CLI is installed, but the daemon was not running in M8, so only `docker compose config` ran. The image will pull CUDA-enabled PyTorch from the lock file, so expect it to be large.
 - **`langgraph` 1.2.20 and `mcp` 1.30.0 are already installed** (via `langchain` and `crewai`), so an import works anywhere before
   M9 adds the boundary test. Adding them as direct dependencies changes no locked version (checked on a scratch copy).
+- **The act-step model chose badly in the M10 spike** (3 live requests, `nemotron-3.5-super-vl:free`): valid tool calls in 1 to 5 s,
+  but `list_documents` instead of a search, no stop when the evidence was complete, and an empty JSON action. So code runs the
+  plan's searches, the act step gets only `search_documents` and `read_page`, and an act step with no call ends the loop.
+- **A failed native tool call must not switch the model's structured-output method** (`_switch_method`), or every later schema
+  goes through tools. The gateway skips that switch when `tools` is set.
+- **Docker's `env_file` keeps an inline comment after an empty value:** `LLM_TEMPERATURE=   # ...` became the text of the comment,
+  and `CITERAG_API_KEY` would have become one too. Comments for empty values sit on their own line in `.env.example`.
+- **The Docker image is about 21 GB** (CUDA PyTorch from the lock). Both services share one image (`citerag:local`).
 - **FastMCP logs every request at INFO** (`Processing request of type ...`). Over stdio, stdout is the protocol: send logs to stderr.
 - Free models expire: on 2026-11-07 OpenRouter's list showed `liquid/lfm-2.5-2.6b:free` expiring on 2026-11-13, and the day before it
   showed no expiry. Re-run `scripts/pick_free_models.py` before choosing a judge.

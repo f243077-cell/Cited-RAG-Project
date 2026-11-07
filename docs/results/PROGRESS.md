@@ -8,7 +8,8 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 | M7 CrewAI | built and pushed; E7 and every live crew run are left unrun |
 | M8 polish | built and pushed; Docker untested; a live first answer not run |
 | Phase 3 M9 tools and MCP | built and pushed; 0 LLM requests |
-| Phase 3 M10 to M12 | in progress (Coder delegated decisions on 2026-11-07: see PHASE3_PRD section 10) |
+| Phase 3 M10 agent graph and Agent mode | built and pushed; 3 LLM requests (tool-calling spike) |
+| Phase 3 M11 and M12 | in progress (Coder delegated decisions on 2026-11-07: see PHASE3_PRD section 10) |
 
 ## M6
 
@@ -45,3 +46,17 @@ Run started 2026-11-06. Quota rule for this run: no live LLM requests on either 
 **Done:** `tools/` (three read-only tools, contracts, caps, gate, filter), `POST /v1/tools/{name}`, `mcp_server/` with
 `citerag mcp` over stdio (HTTP backend by default, `--local`), a boundary test for LangGraph, MCP and CrewAI, `M9_test_guide.md`.
 A real stdio subprocess test proves stdout carries only JSON-RPC.
+
+## Phase 3: M10
+
+**Done:** `agent_graph/` (LangGraph: plan with code-run searches, tools, reflect, act), gateway `tool_step` with native tool calls
+and a once-per-model JSON fallback, `check_room` for the worst case of 8, Agent mode in the pipeline with synthesis on the standard
+generate-and-verify path, `ChatRequest.mode="agent"` and `ChatResponse.trace`, a Mode selector and a plain-text trace on the Chat
+page, `mode: agent` in experiment files, `M10_test_guide.md`.
+
+**Live spend:** 3 requests, the tool-calling spike. The result changed the design (PHASE3_ARCHITECTURE section 3).
+
+**Not done:** a live agent question. The guard was at 38 of 40 after the spike, and the M10 guide lists it as a 3-request step.
+
+**Docker (M8), checked in passing:** the image builds (21 GB). The backend first failed on an `env_file` parsing gotcha, now fixed in
+`.env.example`, and in `.env` by moving two comments without changing a value. Both services now share one image.
