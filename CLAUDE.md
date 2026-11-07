@@ -62,7 +62,7 @@ uv run python scripts/check_release.py     # leakage, attribution and schema che
 uv run python scripts/accept_golden.py --ids a-001,a-002   # the owner only: move reviewed items into golden.jsonl as verified
 uv run citerag quota                      # requests in the last 24 hours against each guard, zero LLM requests
 uv run citerag logs purge --days 30       # delete old log rows
-docker compose config                     # checks the compose file; the images are untested (M8)
+docker compose up -d --build             # backend on 127.0.0.1:8000, UI on 127.0.0.1:8501 (a 21 GB image)
 uv run citerag cache stats                # or: cache clear
 uv run python scripts/review_cache_pairs.py --label   # a human labels the candidates into eval/cache_pairs.jsonl
 uv run citerag eval cache-sweep --pairs eval/cache_pairs.jsonl   # labelled pairs only, zero LLM requests, changes nothing
@@ -219,7 +219,7 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - **CrewAI assumes 8,192 tokens for an unknown model** and summarises above it, which would rewrite passages. `respect_context_window=False` turns that off.
 - CrewAI takes `max_retries`, `default_headers`, `extra_body`, `base_url` and `api_key` on `LLM`, so the key need not sit in the environment.
 - **NLTK refuses hard-linked data files, and uv hard-links by default** when its cache shares a drive with the project. Chunking then crashes with `PermissionError: refusing multiply-linked file`. `[tool.uv] link-mode = "copy"` fixes it. This repo on D: never showed it; a fresh clone on C: did.
-- **The Dockerfile and compose file are untested.** The CLI is installed, but the daemon was not running in M8, so only `docker compose config` ran. The image will pull CUDA-enabled PyTorch from the lock file, so expect it to be large.
+- **Docker was untested until the wind-up** (no daemon in M8). On 2026-11-07 it built and started: `/health` and the UI answer, the frontend holds no provider key and the image holds no `.env`. A change to `pyproject.toml` invalidates the dependency layer, so the next build downloads CUDA PyTorch again (about an hour here).
 - **`langgraph` 1.2.20 and `mcp` 1.30.0 are already installed** (via `langchain` and `crewai`), so an import works anywhere before
   M9 adds the boundary test. Adding them as direct dependencies changes no locked version (checked on a scratch copy).
 - **The act-step model chose badly in the M10 spike** (3 live requests, `nemotron-3.5-super-vl:free`): valid tool calls in 1 to 5 s,

@@ -14,7 +14,7 @@ Run from the repo root unless a step says otherwise.
 | 8 | Read `docs/results/security_checklist.md`, starting with the Gaps | You accept each gap or tell me to close it | 0 |
 | 9 | Read the README | The diagram renders on GitHub, and the Results section is marked provisional | 0 |
 
-**Docker (untested).** The CLI is installed, but the daemon was not running, so no image was built. Start Docker Desktop, then:
+**Docker.** Untested in M8 (the daemon was not running). Built and passed at the wind-up on 2026-11-07 (WINDUP_SMOKE.md). With Docker Desktop open:
 
 ```bash
 docker compose config --quiet
@@ -26,7 +26,7 @@ docker compose exec backend ls -a /app | grep -c '^.env$'
 
 | Check | Expect |
 |---|---|
-| `compose config` | No output, exit 0. This is the only Docker step that has passed |
+| `compose config` | No output, exit 0 |
 | Build | Finishes, and may be several GB: the lock file pulls CUDA-enabled PyTorch |
 | `/health` | 200 |
 | http://localhost:8501 | The UI opens and lists your documents |

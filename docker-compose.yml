@@ -1,4 +1,3 @@
-# UNTESTED: the Docker daemon was not running when this was written. See docs/results/M8_test_guide.md.
 # Ports bind to 127.0.0.1 only: this project has no multi-user auth, and it must stay on this machine.
 services:
   backend:

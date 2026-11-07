@@ -698,7 +698,7 @@ Coverage target: at least 80% lines on `cache/`, `rag/verify.py`, `rag/context.p
 
 ## 19. Deployment
 
-Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.13 slim, `uv sync --frozen`), `docker-compose.yml` with `backend` and `frontend` services sharing a `./data` volume, the frontend using `API_BASE_URL=http://backend:8000`. **Both are written but untested: the Docker daemon was not running in M8.** `docker compose config` passes. Ports bind to 127.0.0.1, and the frontend gets no `env_file`, so it never holds a provider key. Model downloads (embedder, reranker) are large: cache them in a volume. CPU-only PyTorch is enough; the default Linux wheels pull large CUDA libraries, so check the PyTorch and uv docs for a CPU index if image size matters (not verified here). Cloud deployment is out of scope (Phase 5).
+Local first: two commands (section 4). For F-OPS-4: one `Dockerfile` (Python 3.13 slim, `uv sync --frozen`), `docker-compose.yml` with `backend` and `frontend` services sharing a `./data` volume, the frontend using `API_BASE_URL=http://backend:8000`. Untested in M8 (no Docker daemon); built and started at the wind-up on 2026-11-07, with `/health` and the UI answering. Ports bind to 127.0.0.1, and the frontend gets no `env_file`, so it never holds a provider key. Model downloads (embedder, reranker) are large: cache them in a volume. CPU-only PyTorch is enough; the default Linux wheels pull large CUDA libraries, so check the PyTorch and uv docs for a CPU index if image size matters (not verified here). Cloud deployment is out of scope (Phase 5).
 
 ## 20. Architecture decisions
 

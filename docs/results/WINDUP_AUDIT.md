@@ -108,7 +108,7 @@ human step or a live run that has not happened. *missing*: not built.
 | F-OPS-1 | done | `requests` and `llm_calls` tables | `uv run pytest tests/unit/test_log_store.py` |
 | F-OPS-2 | done | Daily guard counts every attempt; hits still served | `uv run pytest tests/integration/test_request_guard.py` |
 | F-OPS-3 | done | `/health` with versions, manifest, namespace, cache, warnings | `uv run pytest tests/integration/test_health.py` |
-| F-OPS-4 | partial | Dockerfile and compose build (a 21 GB image); `docker compose up` after the `env_file` fix is listed in HANDOFF.md | `docker compose config --quiet` |
+| F-OPS-4 | met | `docker compose build` then `up -d` on 2026-11-07: backend healthy, `/health` 200, Streamlit `/_stcore/health` 200, ports on 127.0.0.1 only, no provider key in the frontend, no `.env` in the image (WINDUP_SMOKE.md) | `docker compose up -d`, then `curl http://127.0.0.1:8000/health` |
 | F-OPS-5 | done | Shadow dollars read 0 for free models | `uv run pytest tests/unit/test_pricing.py` |
 | F-OPS-6 | done | Limiter, Retry-After, retries logged | `uv run pytest tests/unit/test_llm_layer.py tests/unit/test_gateway.py` |
 | F-OPS-7 | done | `scripts/pick_free_models.py` | `uv run pytest tests/unit/test_pick_free_models.py` |

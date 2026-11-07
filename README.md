@@ -63,7 +63,7 @@ Open http://localhost:8501, go to Chat and ask a question. Upload your own files
 
 **The semantic cache is off by default** (`CACHE_ENABLED=false`). `CACHE_THRESHOLD=0.92` is an unvalidated placeholder that can serve a wrong answer to a similar question. If you turn the cache on before a sweep on labelled pairs recommends your threshold, the API logs a warning and `/health` and the home page show it. Step 6 of [the handoff](docs/results/HANDOFF.md) validates it.
 
-With Docker: `docker compose up --build` (backend on 127.0.0.1:8000, UI on 127.0.0.1:8501). The image builds, but it is about 21 GB because the lock file pulls CUDA-enabled PyTorch, and a full `up` after the last fix is still to be confirmed (handoff step 12).
+With Docker: `docker compose up --build` (backend on 127.0.0.1:8000, UI on 127.0.0.1:8501). Tested at the wind-up (2026-11-07): the image builds and both services start, `/health` and the UI answer, and the frontend holds no provider key. The image is about 21 GB because the lock file pulls CUDA-enabled PyTorch, so the first build takes about an hour.
 
 ## Configuration
 
