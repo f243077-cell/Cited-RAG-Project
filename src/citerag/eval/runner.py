@@ -169,6 +169,7 @@ async def _answer_item(item: GoldenItem, deps: Deps, run_id: str, mode: str) -> 
         retrieved=seen["retrieved"],
         warnings=response.warnings,
         usage=response.usage,
+        trace=response.trace,
     )
 
 

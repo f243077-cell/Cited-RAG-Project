@@ -244,6 +244,7 @@ class ItemRecord(BaseModel):
     verdict: JudgeVerdict | None = None
     judge_error: str | None = None
     judge_requests: int = 0
+    trace: AgentTrace | None = None  # Agent mode: tool calls are checked for canaries too (E8)
 
 
 class Rate(BaseModel):
