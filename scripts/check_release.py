@@ -25,6 +25,7 @@ FORBIDDEN_PATHS = [
         r"^eval/results/",
         r"(^|/)\.claude/",
         r"(^|/)\.mcp\.json$",
+        r"(^|/)\.playwright-mcp/",
         r"\.(safetensors|onnx|pt|pth|ckpt)$",
         r"(^|/)chroma/",
     )

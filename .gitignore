@@ -27,3 +27,4 @@ Claude outputs/
 **/chroma/
 **/index_*/
 **/semantic_cache.sqlite
+.playwright-mcp/
