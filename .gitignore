@@ -20,3 +20,10 @@ eval/results/
 .vscode/
 # local AI tool output
 Claude outputs/
+# local Claude Code and tool configuration
+.claude/
+.mcp.json
+# model, index and cache folders if they ever land outside data/
+**/chroma/
+**/index_*/
+**/semantic_cache.sqlite
