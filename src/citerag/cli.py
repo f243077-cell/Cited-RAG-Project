@@ -217,6 +217,7 @@ def eval_run(
     skip_judge: Annotated[bool, typer.Option(help="No verdicts now; --resume adds them later")] = False,
     skip_type: Annotated[list[str] | None, typer.Option(help="Leave out an item type")] = None,
     require_verified: Annotated[bool, typer.Option(help="Refuse items no human has verified")] = False,
+    estimate: Annotated[bool, typer.Option(help="Print the LLM request estimate and stop")] = False,
 ) -> None:
     """Score the system on a golden file. Saves after every item, so a run can resume."""
     from citerag.eval.execute import execute_run
@@ -231,8 +232,16 @@ def eval_run(
             index_dir = index_dir or experiment.index_dir
         target = index_dir or settings.index_dir
         items = load_golden(golden, require_verified=require_verified)
-        leave_out = {*(skip_type or []), *(["image"] if offline else [])}  # needs a vision call
+        mode = experiment.mode if experiment else "standard"
+        no_images = offline or mode == "agent"  # offline needs a vision call; Agent mode takes no images
+        leave_out = {*(skip_type or []), *(["image"] if no_images else [])}
         items = [item for item in items if item.type not in leave_out][:limit]
+        if estimate:
+            from citerag.eval.modes import estimate as estimate_requests
+
+            expected, worst = estimate_requests(items, mode, skip_judge)
+            typer.echo(f"{len(items)} items in {mode} mode: about {expected} LLM requests, {worst} at worst")
+            return
         _check_index(target, settings)
         summary = execute_run(
             settings, golden, items, target, experiment, offline, rerank, max_requests, resume, skip_judge
@@ -536,6 +545,35 @@ def eval_analyze_failures(
     except CiteRAGError as exc:
         typer.echo(f"{exc.code}: {exc.message}")
         raise typer.Exit(1) from exc
+    typer.echo(f"Report: {out}")
+
+
+@eval_app.command("report-e8")
+def eval_report_e8(
+    runs: Annotated[list[str], typer.Argument(help="Run ids, in the column order you want")],
+    out: Annotated[Path, typer.Option(help="The report")] = Path("docs/results/E8_modes.md"),
+) -> None:
+    """E8 table: standard, Deep and Agent runs side by side. Reads run folders only: zero LLM requests."""
+    from citerag.analytics.plots import grouped_bars
+    from citerag.eval.modes import ModeColumn, render
+    from citerag.eval.report import load_detail
+
+    try:
+        columns = []
+        for run_id in runs:
+            detail = load_detail(run_id)
+            columns.append(ModeColumn(detail.summary.experiment or run_id, detail.summary, detail.items))
+    except CiteRAGError as exc:
+        typer.echo(f"{exc.code}: {exc.message}")
+        raise typer.Exit(1) from exc
+    import pandas as pd
+
+    shares = pd.DataFrame({c.name: c.summary.headline() for c in columns}).dropna(how="all")
+    chart = out.with_name("e8_modes.png")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if not shares.empty:
+        grouped_bars(shares.iloc[:, :3], "E8: standard vs Deep vs Agent").savefig(chart, dpi=150)
+    out.write_text(render(columns, chart.name if not shares.empty else None), encoding="utf-8")
     typer.echo(f"Report: {out}")
 
 
