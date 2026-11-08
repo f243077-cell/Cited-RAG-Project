@@ -1,0 +1,22 @@
+# CiteRAG UI theme (the redesign of 2026-11-08). Streamlit reads this file from the folder it is started in: the repo root.
+[theme]
+base = "dark"
+primaryColor = "#6E8BFF"
+backgroundColor = "#0D1015"
+secondaryBackgroundColor = "#161A22"
+textColor = "#E6E8EE"
+linkColor = "#8EA2FF"
+borderColor = "#232833"
+showWidgetBorder = true
+baseRadius = "10px"
+buttonRadius = "10px"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, monospace"
+baseFontSize = 15
+
+[theme.sidebar]
+backgroundColor = "#11141B"
+secondaryBackgroundColor = "#161A22"
+
+[client]
+toolbarMode = "minimal"

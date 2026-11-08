@@ -88,13 +88,16 @@ def test_chat_shows_the_answer_with_a_citation_card(monkeypatch):
     assert not app.exception
     assert client.requests[0].message == "how long?" and client.requests[0].doc_ids is None
     assert any("Thirty days" in m.value for m in app.markdown)
-    assert "policy.pdf, p3" in app.expander[0].label and "check_circle" in app.expander[0].label
+    assert "policy.pdf · Page 3" in app.expander[0].label and "Checked" in app.expander[0].label
+    chips = " ".join(h.proto.body for h in app.get("html"))
+    assert "1 of 1 citations checked" in chips and "Standard mode" in chips
+    assert any(" `1`" in m.value for m in app.markdown)  # the [1] marker becomes a chip, still Markdown
 
 
 def test_a_failed_citation_shows_a_warning_card(monkeypatch):
     app = run_page(monkeypatch, "1_Chat.py", StubClient(response(valid=False)))
     app.chat_input[0].set_value("how long?").run()
-    assert "warning" in app.expander[0].label
+    assert "Not found" in app.expander[0].label
 
 
 def test_chat_shows_backend_errors(monkeypatch):
@@ -311,9 +314,9 @@ def test_the_dashboard_shows_hits_and_savings_from_the_log(monkeypatch):
     st.cache_data.clear()
     app = run_page(monkeypatch, "3_Dashboard.py", DashboardClient())
     assert not app.exception
-    text = " ".join(m.value for m in app.markdown)
-    assert "2 requests" in text and "1 cache hits of 2 lookups" in text and "1 LLM requests saved" in text
-    assert "threshold 0.92" in " ".join(c.value for c in app.caption)
+    cards = " ".join(h.proto.body for h in app.get("html"))
+    assert ">Requests<" in cards and ">2<" in cards and "of 2 lookups" in cards and "50%" in cards
+    assert "LLM requests saved" in cards and "Threshold" in cards and "0.92" in cards
 
 
 def test_the_dashboard_says_when_there_is_no_sweep_or_no_request(monkeypatch):
@@ -395,3 +398,52 @@ def test_an_agent_answer_shows_its_trace_as_plain_text(monkeypatch):
     texts = [t.value for t in app.text]
     assert "1. What are the *tiers*?" in texts
     assert any("search_documents(query='<b>tiers</b>')" in t and "[csf.pdf p8]" in t for t in texts)
+
+
+class HomeClient(StubClient):
+    def health(self):
+        return {"llm_requests_24h": 25, "max_requests_per_day": 40, "warnings": ["cache warning"]}
+
+
+def test_home_shows_the_library_at_a_glance_and_the_health_warnings(monkeypatch):
+    common.cached_health.clear()
+    monkeypatch.setattr(common, "get_client", lambda: HomeClient())
+    app = AppTest.from_file(str(PAGES.parent / "home.py"), default_timeout=20).run()
+    assert not app.exception
+    cards = " ".join(h.proto.body for h in app.get("html"))
+    assert "Library at a glance" in cards and "1 PDF" in cards and "Across 1 PDF" in cards
+    assert app.warning[0].value == "cache warning"
+    assert [b.label for b in app.button] == ["Open chat", "Add documents"]
+
+
+def test_the_router_draws_the_status_card_with_the_request_count(monkeypatch):
+    common.cached_health.clear()
+    monkeypatch.setattr(common, "get_client", lambda: HomeClient())
+    app = AppTest.from_file(str(PAGES.parent / "app.py"), default_timeout=20).run()
+    assert not app.exception
+    sidebar = " ".join(h.proto.body for h in app.sidebar.get("html"))
+    assert "Backend running" in sidebar and "25 / 40" in sidebar
+
+
+def test_the_library_table_escapes_document_names(monkeypatch):
+    client = StubClient()
+    client.documents = lambda: [
+        DocumentInfo(
+            doc_id="d",
+            doc_name="<b>x</b>.pdf",
+            pages=2,
+            chunks=1,
+            size_bytes=9,
+            ingested_at=datetime.now(UTC),
+        )
+    ]
+    app = run_page(monkeypatch, "2_Library.py", client)
+    table = " ".join(h.proto.body for h in app.get("html"))
+    assert "&lt;b&gt;x&lt;/b&gt;.pdf" in table and "<b>x</b>" not in table
+
+
+def test_style_escapes_every_value_it_is_given():
+    from citerag.ui import style
+
+    assert "<script>" not in style.stat("<script>", "<script>", "<script>", "<script>")
+    assert "<i>" not in style.pill("<i>", "<i>") and "<i>" not in style.badge("<i>", "good")
