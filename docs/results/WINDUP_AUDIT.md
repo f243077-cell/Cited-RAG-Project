@@ -28,10 +28,10 @@ human step or a live run that has not happened. *missing*: not built.
 | M4 Evaluation | Baseline on at least 40 human-verified items; targets table updated | **partial** | 0 items verified (owner's task); no answerable run with verdicts |
 | M5 Multimodal | US-5 and US-6 demonstrable; image items in the set | done | Image items exist as unverified drafts |
 | M6 Semantic cache | Threshold chosen from a sweep; before/after report | **partial** | Needs your labels (sweep) and a live replay (E6) |
-| M7 CrewAI | E7 Deep vs standard written up | **partial** | E7 not run; Deep mode runs live once in the wind-up smoke test if the budget allows |
+| M7 CrewAI | E7 Deep vs standard written up | **partial** | E7 not run; Deep mode passed one live question in the wind-up smoke test (3 requests, WINDUP_SMOKE.md) |
 | M8 Polish | A fresh clone runs from the README | done | Proven in the wind-up clean-clone step (WINDUP_SMOKE.md) |
 | M9 Tools and MCP | Tools, MCP over stdio, in-process and subprocess tests | done | |
-| M10 Agent | Graph on fakes, limits, guard, trace | done | One live agent question in the wind-up smoke test |
+| M10 Agent | Graph on fakes, limits, guard, trace | done | One live agent question passed in the wind-up smoke test (3 requests, WINDUP_SMOKE.md) |
 | M11 E8 | Rehearsal on fakes; estimate prints | done | The live E8 run waits for the verified set |
 | M12 Supervisor | Same fake tests; comparison tooling; dev log | done | The live comparison waits for the verified set |
 
@@ -127,7 +127,7 @@ human step or a live run that has not happened. *missing*: not built.
 |---|---|---|---|
 | F-TOOL-1 to F-TOOL-7 | done | `tools/`: three read-only tools, validation, caps, gate, typed errors, filter | `uv run pytest tests/unit/test_tools.py` |
 | F-MCP-1 to F-MCP-4 | done | `citerag mcp`, stdio only, stderr logging, HTTP backend by default | `uv run pytest tests/integration/test_mcp_and_tools_api.py` |
-| F-MCP-5 | done | A real subprocess completes `initialize` and `tools/list` | same file, `test_stdio_server_speaks_only_json_rpc_on_stdout` |
+| F-MCP-5 | done | A real subprocess completes `initialize` and `tools/list`; at the wind-up the SDK's stdio client also ran searches in both modes (WINDUP_SMOKE.md) | same file, `test_stdio_server_speaks_only_json_rpc_on_stdout` |
 | F-GRF-1 to F-GRF-8 | done | `agent_graph/`: plan with code-run searches, reflect, act, limits, guard pre-check, trace, cache skipped | `uv run pytest tests/integration/test_agent_mode.py tests/unit/test_agent_routing.py` |
 | F-GRF-9 | partial | Escaping and tool-argument canary checks tested on fakes; no live canary run in Agent mode | `uv run pytest tests/integration/test_agent_mode.py tests/integration/test_e8.py` |
 | F-AUI-1 to F-AUI-3 | done | `mode="agent"`, trace, Chat selector, images refused | `uv run pytest tests/unit/test_ui.py tests/integration/test_agent_mode.py` |

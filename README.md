@@ -192,7 +192,7 @@ The free tier allows 20 requests per minute and 50 per day, and every HTTP attem
 | Cache hit rate, request reduction | at least 30%, 25% | not measured | E6 needs labelled pairs and a live run |
 | False-hit rate | at most 2% | not measured | E5 needs your labels |
 | Deep vs standard, three modes (E7, E8) | none set | not measured | Needs the verified set and a live run |
-| Live smoke test at the wind-up | all paths work | see [WINDUP_SMOKE.md](docs/results/WINDUP_SMOKE.md) | A handful of single questions, not an evaluation |
+| Live smoke test at the wind-up | 6 of 6 steps passed (agent, answerable, cache repeat, unanswerable, injection, Deep), 9 requests | [WINDUP_SMOKE.md](docs/results/WINDUP_SMOKE.md) | One question per path, not an evaluation |
 
 ![Hybrid against vector and BM25 search](docs/results/e2_hybrid.png)
 
