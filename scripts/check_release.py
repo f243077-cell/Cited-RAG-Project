@@ -110,11 +110,19 @@ def schema_problems() -> list[str]:
     golden = ROOT / "eval/golden/golden.jsonl"
     if golden.exists() and not all(i.verified for i in load_golden(golden)):
         found.append("eval/golden/golden.jsonl holds an unverified item")
+    if golden.exists() and not all(i.reviewed_by for i in load_golden(golden)):
+        found.append(
+            "eval/golden/golden.jsonl holds an item with no reviewed_by: say whether a human or Claude checked it"
+        )
     if any(p.labelled or p.label for p in load_pairs(ROOT / "eval/cache_pairs.candidates.jsonl")):
         found.append("a cache-pair candidate carries a label: labels belong in eval/cache_pairs.jsonl")
     labelled = ROOT / "eval/cache_pairs.jsonl"
     if labelled.exists() and not all(p.labelled for p in load_pairs(labelled)):
         found.append("eval/cache_pairs.jsonl holds an unlabelled pair")
+    if labelled.exists() and not all(p.reviewed_by for p in load_pairs(labelled)):
+        found.append(
+            "eval/cache_pairs.jsonl holds a pair with no reviewed_by: say whether a human or Claude labelled it"
+        )
     for config in sorted((ROOT / "configs/experiments").glob("*.yaml")):
         load_experiment(config)
     keys = {
