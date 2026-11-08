@@ -117,3 +117,16 @@ def test_the_bench_chart_has_one_panel_per_measure():
         requests_used=3,
     )
     assert len(plots.bench_chart(summary).axes) == 3
+
+
+def test_the_dark_dashboard_charts_return_figures_and_cope_with_one_kind_only():
+    frame = requests()
+    assert is_chart(plots.hit_rate_trend(frame)) and is_chart(plots.similarity_zones(frame, 0.92))
+    for part in (frame[~frame.cache_hit], frame[frame.cache_hit], frame.head(1)):
+        assert is_chart(plots.hit_rate_trend(part.reset_index(drop=True)))
+        assert is_chart(plots.similarity_zones(part, 0.92))
+
+
+def test_the_hit_rate_trend_labels_the_latest_rate():
+    figure = plots.hit_rate_trend(requests())
+    assert "50%" in [t.get_text() for t in figure.axes[0].texts]

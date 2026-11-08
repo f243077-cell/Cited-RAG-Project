@@ -281,3 +281,74 @@ def bench_chart(summary: BenchSummary) -> Figure:
         f"Cache off vs on, {off.n_items} questions",
         2.0,
     )
+
+
+# Dark charts for the redesigned dashboard (2026-11-08): the card colour is the figure colour, so a chart sits flat
+# inside its card. Same data rules as above: one series per chart, direct labels, the table carries the numbers.
+DARK_SURFACE = "#151922"
+DARK_INK = "#E6E8EE"
+DARK_MUTED = "#9AA3B2"
+DARK_GRID = "#232833"
+DARK_ACCENT = "#6E8BFF"
+DARK_WARN = "#E5B454"
+
+
+def _dark_canvas(width: float, height: float) -> Figure:
+    fig = Figure(figsize=(width, height), layout="constrained", facecolor=DARK_SURFACE)
+    ax = fig.add_subplot(1, 1, 1, facecolor=DARK_SURFACE)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color(DARK_GRID)
+    ax.tick_params(colors=DARK_MUTED, length=0, labelsize=8)
+    ax.grid(axis="y", color=DARK_GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    return fig
+
+
+def hit_rate_trend(requests: pd.DataFrame, last: int = 20) -> Figure:
+    """Cumulative hit rate over the last `last` cache lookups, with the latest value labelled."""
+    recent = requests.tail(last)
+    rate = recent.cache_hit.astype(float).expanding().mean().to_numpy()
+    x = np.arange(1, len(rate) + 1)
+    fig = _dark_canvas(7.6, 2.6)
+    ax = fig.axes[0]
+    ax.fill_between(x, rate, color=DARK_ACCENT, alpha=0.14, linewidth=0)
+    ax.plot(x, rate, color=DARK_ACCENT, linewidth=2)
+    ax.scatter(x[:1], rate[:1], s=36, facecolor=DARK_SURFACE, edgecolor=DARK_ACCENT, linewidth=1.6, zorder=3)
+    ax.scatter(x[-1:], rate[-1:], s=36, color=DARK_ACCENT, zorder=3)
+    ax.annotate(f"{rate[-1]:.0%}", (x[-1], rate[-1]), xytext=(0, 9), textcoords="offset points", ha="center",
+                color=DARK_INK, fontsize=9)  # fmt: skip
+    ax.set_ylim(0, 1.08)
+    ax.set_xlim(0.7, max(len(rate), 2) + 0.3)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1], ["0%", "25%", "50%", "75%", "100%"])
+    ax.set_xticks(x if len(x) <= 20 else x[::5])
+    ax.set_xlabel("Request", color=DARK_MUTED, fontsize=8)
+    return fig
+
+
+def similarity_zones(requests: pd.DataFrame, threshold: float) -> Figure:
+    """Where the lookups landed: misses below the threshold, hits at or above it."""
+    seen = requests[requests.cache_similarity.notna()]
+    hit = seen.cache_hit.astype(bool)
+    fig = _dark_canvas(3.9, 2.4)
+    ax = fig.axes[0]
+    ax.grid(False)
+    ax.axvspan(0, threshold, color=DARK_WARN, alpha=0.10, linewidth=0)
+    ax.axvspan(threshold, 1, color=DARK_ACCENT, alpha=0.22, linewidth=0)
+    ax.axvline(threshold, color=DARK_INK, linewidth=1, linestyle=(0, (3, 3)))
+    ax.text(threshold, 1.04, f"threshold {threshold:.2f}", color=DARK_MUTED, fontsize=7.5, ha="right",
+            transform=ax.get_xaxis_transform())  # fmt: skip
+    ax.text(threshold / 2, 0.5, "Miss zone", color=DARK_WARN, fontsize=8, ha="center", va="center",
+            transform=ax.get_xaxis_transform())  # fmt: skip
+    rng = np.random.default_rng(0)
+    for values, color in (
+        (seen.cache_similarity[~hit], DARK_WARN),
+        (seen.cache_similarity[hit], DARK_ACCENT),
+    ):
+        if len(values):
+            ax.scatter(values, rng.uniform(0.25, 0.75, len(values)), s=22, color=color, edgecolor=DARK_SURFACE,
+                       linewidth=1, zorder=3, transform=ax.get_xaxis_transform())  # fmt: skip
+    ax.set_xlim(0, 1)
+    ax.set_yticks([])
+    ax.set_xlabel("Cosine similarity", color=DARK_MUTED, fontsize=8)
+    return fig
