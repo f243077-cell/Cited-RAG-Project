@@ -72,7 +72,9 @@ def label_pairs(
             break
         if answer not in KEYS:
             continue
-        done[pair.id] = pair.model_copy(update={"labelled": True, "label": KEYS[answer]})
+        done[pair.id] = pair.model_copy(
+            update={"labelled": True, "label": KEYS[answer], "reviewed_by": "human"}
+        )
         save_pairs(labelled, done.values())
         added += 1
     return added

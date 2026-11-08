@@ -19,13 +19,15 @@ from citerag.eval.golden import load_golden
 from citerag.schemas import GoldenItem
 
 
-def accept(candidates: list[GoldenItem], golden: list[GoldenItem], ids: list[str]) -> list[GoldenItem]:
+def accept(
+    candidates: list[GoldenItem], golden: list[GoldenItem], ids: list[str], reviewed_by: str = "human"
+) -> list[GoldenItem]:
     by_id = {item.id: item for item in candidates}
     unknown = [i for i in ids if i not in by_id]
     if unknown:
         raise typer.BadParameter(f"not in the candidates: {', '.join(unknown)}")
     kept = {item.id: item for item in golden if item.id not in ids}
-    accepted = {i: by_id[i].model_copy(update={"verified": True}) for i in ids}
+    accepted = {i: by_id[i].model_copy(update={"verified": True, "reviewed_by": reviewed_by}) for i in ids}
     return [*kept.values(), *accepted.values()]
 
 
@@ -33,16 +35,21 @@ def main(
     ids: Annotated[str, typer.Option(help="Comma-separated ids you reviewed, e.g. a-001,m-002")],
     candidates: Annotated[Path, typer.Option()] = Path("eval/golden/candidates.jsonl"),
     golden: Annotated[Path, typer.Option()] = Path("eval/golden/golden.jsonl"),
+    reviewed_by: Annotated[
+        str, typer.Option(help="human, or claude for an AI review (reports say so)")
+    ] = "human",
 ) -> None:
+    if reviewed_by not in ("human", "claude"):
+        raise typer.BadParameter("--reviewed-by must be human or claude")
     chosen = [i.strip() for i in ids.split(",") if i.strip()]
     if not chosen:
         raise typer.BadParameter("give at least one id")
     current = load_golden(golden) if golden.exists() else []
-    items = accept(load_golden(candidates), current, chosen)
+    items = accept(load_golden(candidates), current, chosen, reviewed_by)
     golden.write_text(
         "".join(item.model_dump_json(exclude_none=True) + "\n" for item in items), encoding="utf-8"
     )
-    typer.echo(f"{len(chosen)} accepted; {golden} now holds {len(items)} verified item(s).")
+    typer.echo(f"{len(chosen)} accepted ({reviewed_by}); {golden} now holds {len(items)} verified item(s).")
 
 
 if __name__ == "__main__":

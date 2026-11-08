@@ -59,7 +59,7 @@ uv run citerag eval report-e8 <standard_run> <deep_run> <agent_run>   # E8 table
 uv run citerag eval report-e8 <single> <supervisor> <deep> --title "M12: single agent vs supervisor vs Deep" --out docs/results/M12_multi_agent.md
 uv run citerag mcp                        # MCP server over stdio; calls the running API (add --local with the API stopped)
 uv run python scripts/check_release.py     # leakage, attribution and schema checks; run before every commit
-uv run python scripts/accept_golden.py --ids a-001,a-002   # the owner only: move reviewed items into golden.jsonl as verified
+uv run python scripts/accept_golden.py --ids a-001,a-002   # move reviewed items into golden.jsonl as verified; --reviewed-by claude for an AI review
 uv run citerag quota                      # requests in the last 24 hours against each guard, zero LLM requests
 uv run citerag logs purge --days 30       # delete old log rows
 docker compose up -d --build             # backend on 127.0.0.1:8000, UI on 127.0.0.1:8501 (a 21 GB image)

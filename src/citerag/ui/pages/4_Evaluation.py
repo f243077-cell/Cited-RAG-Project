@@ -39,6 +39,11 @@ if run.unverified_items:
     st.warning(
         f"{run.unverified_items} of {run.n_items} items are not verified by a human: provisional numbers."
     )
+if run.ai_reviewed_items:
+    st.warning(
+        f"{run.ai_reviewed_items} of {run.n_items} items were AI-reviewed (Claude), not human-verified: "
+        "provisional numbers."
+    )
 if run.reason:
     st.info(f"Run {run.status}: {run.reason}")
 

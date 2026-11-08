@@ -189,8 +189,11 @@ def eval_retrieval(
         store.close()
 
     unverified = sum(not item.verified for item in items)
+    ai_reviewed = sum(item.reviewed_by == "claude" for item in items)
     if unverified:
         typer.echo(f"UNVERIFIED: {unverified} of {len(items)} items have not been checked by a human")
+    if ai_reviewed:
+        typer.echo(f"AI-REVIEWED: {ai_reviewed} of {len(items)} items were checked by Claude, not a human")
     for row in before.items:
         rank = "-" if row.first_hit_rank is None else row.first_hit_rank
         typer.echo(f"{row.id}: rank {rank}, cosine {row.top_cosine:.3f}, top {row.top_sources[:1]}")
@@ -205,6 +208,7 @@ def eval_retrieval(
     summary = {
         "golden": str(golden),
         "unverified_items": unverified,
+        "ai_reviewed_items": ai_reviewed,
         "config": _retrieval_config(settings),
         "before_rerank": before.model_dump(),
         "after_rerank": after.model_dump() if after else None,
@@ -263,6 +267,11 @@ def eval_run(
     if summary.unverified_items:
         typer.echo(
             f"UNVERIFIED: {summary.unverified_items} of {summary.n_items} items: provisional numbers only"
+        )
+    if summary.ai_reviewed_items:
+        typer.echo(
+            f"AI-REVIEWED: {summary.ai_reviewed_items} of {summary.n_items} items were checked by Claude, "
+            "not a human"
         )
     typer.echo(f"Run {summary.run_id}: {summary.status}{f' ({summary.reason})' if summary.reason else ''}")
     typer.echo(f"Items done: {summary.n_done} of {summary.n_items}. LLM requests: {summary.requests_used}")
@@ -420,6 +429,8 @@ def eval_cache_sweep(
     chart.parent.mkdir(parents=True, exist_ok=True)
     threshold_chart(result).savefig(chart, dpi=150)
     typer.echo(f"Labelled pairs: {result.n_equivalent} equivalent, {result.n_near_miss} near miss")
+    if result.ai_labelled:
+        typer.echo(f"AI-LABELLED: {result.ai_labelled} pairs were labelled by Claude, not a human")
     if not result.enough_pairs:
         typer.echo("PROVISIONAL: F-CAC-8 needs at least 30 of each")
     if result.recommended is None:

@@ -101,6 +101,7 @@ def execute_run(
         n_items=len(items),
         n_done=0 if result is None else len(result.records),
         unverified_items=sum(not item.verified for item in items),
+        ai_reviewed_items=sum(item.reviewed_by == "claude" for item in items),
         requests_used=0 if result is None else result.requests,
         before_rerank=to_scores(before),
         after_rerank=to_scores(after) if after else None,

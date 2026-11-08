@@ -34,6 +34,9 @@ class CachePair(BaseModel):
     source: str | None = None  # golden item the pair came from
     labelled: bool = False
     label: PairLabel | None = None
+    reviewed_by: Literal["human", "claude"] | None = (
+        None  # who labelled it; "claude" is reported as AI-labelled
+    )
 
     @model_validator(mode="after")
     def _label_goes_with_labelled(self) -> CachePair:
@@ -65,6 +68,7 @@ class SweepResult(BaseModel):
     enough_pairs: bool
     max_false_hit_rate: float
     recommended: float | None
+    ai_labelled: int = 0  # pairs labelled by Claude, not a human
     rows: list[SweepRow]  # what the cache does: similarity at or above tau AND the guard passes
     rows_without_guard: list[SweepRow]
     worst_near_misses: list[PairScore]  # the pairs that decide the threshold: read these first
@@ -130,6 +134,7 @@ def sweep_pairs(
         rows=rows,
         rows_without_guard=_rows(sims, equivalent),
         worst_near_misses=worst[:10],
+        ai_labelled=sum(pair.reviewed_by == "claude" for pair in labelled),
     )
 
 
@@ -146,6 +151,11 @@ def threshold_warning(enabled: bool, threshold: float, sweep: SweepResult | None
         )
     elif sweep.recommended is None or abs(sweep.recommended - threshold) > 1e-9:
         reason = f"the last sweep recommended {sweep.recommended}, not {threshold}"
+    elif sweep.ai_labelled:
+        return (
+            f"CACHE_THRESHOLD={threshold} comes from a sweep whose pairs were labelled by Claude, not a human "
+            f"({sweep.ai_labelled} AI-labelled). Check the labels with uv run python scripts/review_cache_pairs.py."
+        )
     else:
         return None
     return (

@@ -1,4 +1,4 @@
-"""Load golden items. `verified` stays with the human reviewer: nothing here ever sets it."""
+"""Load golden items. Only scripts/accept_golden.py sets `verified`; `reviewed_by` records who checked the item."""
 
 from __future__ import annotations
 

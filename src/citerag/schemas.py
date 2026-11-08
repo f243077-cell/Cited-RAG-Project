@@ -222,7 +222,8 @@ class GoldenItem(BaseModel):
     gold_sources: list[GoldenSource] = Field(default_factory=list)
     image_path: str | None = None
     canary: str | None = None  # injection items: this string must NOT appear in the answer
-    verified: bool = False  # a human checked question, answer and sources
+    verified: bool = False  # a reviewer checked question, answer and sources
+    reviewed_by: Literal["human", "claude"] | None = None  # "claude": AI-reviewed, and every report says so
 
 
 class ItemRecord(BaseModel):
@@ -295,6 +296,7 @@ class RunSummary(BaseModel):
     n_items: int
     n_done: int = 0
     unverified_items: int
+    ai_reviewed_items: int = 0  # verified by Claude, not a human: the numbers stay provisional
     requests_used: int = 0
     before_rerank: RetrievalScores | None = None
     after_rerank: RetrievalScores | None = None

@@ -131,9 +131,10 @@ def render(
     columns: list[ModeColumn], chart: str | None = None, title: str = "E8: standard vs Deep vs Agent"
 ) -> str:
     unverified = max((c.summary.unverified_items for c in columns), default=0)
+    ai_reviewed = max((c.summary.ai_reviewed_items for c in columns), default=0)
     head = "| Metric | " + " | ".join(c.name for c in columns) + " |"
     lines = [
-        f"# {title}" + (" (provisional)" if unverified else ""),
+        f"# {title}" + (" (provisional)" if unverified or ai_reviewed else ""),
         "",
         "Runs: " + ", ".join(f"`{c.summary.run_id}`" for c in columns) + ".",
         "",
@@ -141,6 +142,11 @@ def render(
     ]
     if unverified:
         lines += ["", f"**{unverified} items are not verified by a human: no number here is a result.**"]
+    if ai_reviewed:
+        lines += [
+            "",
+            f"**{ai_reviewed} items were AI-reviewed (Claude), not human-verified: the numbers are provisional.**",
+        ]
     lines += ["", head, "|---|" + "---|" * len(columns)]
     lines += [f"| {name} | " + " | ".join(cells) + " |" for name, cells in table(columns)]
     if chart:
