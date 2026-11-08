@@ -188,10 +188,12 @@ div[data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) code { color:
   padding: 3px; gap: 2px; display: flex; flex-wrap: nowrap; width: 100%; }
 .st-key-mode [data-testid="stRadioGroup"] > div { flex: 1 1 0; min-width: 0; margin: 0; border-radius: 8px;
   display: flex; }
-.st-key-mode [data-testid="stRadioOption"] { width: 100%; justify-content: center; padding: 0.4rem 0; margin: 0;
-  cursor: pointer; }
+.st-key-mode [data-testid="stRadioOption"] { display: flex !important; width: 100%; justify-content: center;
+  padding: 0.4rem 0; margin: 0; cursor: pointer; }
+.st-key-mode [data-testid="stRadioOption"] > div { width: 100%; justify-content: center; }
 .st-key-mode [data-testid="stRadioOption"] > div > div:first-child { display: none; }
-.st-key-mode [data-testid="stRadioOption"] p { font-size: 0.86rem; color: var(--muted); white-space: nowrap; }
+.st-key-mode [data-testid="stRadioOption"] p { font-size: 0.86rem; color: var(--muted); white-space: nowrap;
+  text-align: center; }
 .st-key-mode [data-testid="stRadioGroup"] > div[data-selected="true"] { background: #222A3C; }
 .st-key-mode [data-testid="stRadioGroup"] > div[data-selected="true"] p { color: var(--ink); font-weight: 600; }
 .st-key-new_chat button { width: 100%; }
