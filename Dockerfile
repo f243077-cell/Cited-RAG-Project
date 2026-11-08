@@ -9,12 +9,15 @@ RUN pip install --no-cache-dir uv==0.12.7
 
 WORKDIR /app
 
-# The lock file first, so a source change does not reinstall every dependency
-COPY pyproject.toml uv.lock README.md ./
+# The lock file first, so a source or README change does not reinstall every dependency (CUDA PyTorch is about an hour)
+COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
+COPY README.md ./
 COPY src ./src
 COPY configs ./configs
+# The UI theme: Streamlit reads .streamlit/config.toml from the folder it starts in, /app
+COPY .streamlit ./.streamlit
 RUN uv sync --frozen
 
 EXPOSE 8000 8501
