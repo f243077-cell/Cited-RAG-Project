@@ -8,6 +8,7 @@ unverified golden set, the same-model judge or an unvalidated threshold.
 | File | What it is |
 |---|---|
 | [HANDOFF.md](HANDOFF.md) | The steps only the owner can do, in order, with cost and failure criteria |
+| [HANDOFF_PROGRESS.md](HANDOFF_PROGRESS.md) | Steps 1 to 8 done by Claude on 2026-11-08: AI-reviewed golden set and cache pairs, retrieval, gate, sweep, judge |
 | [WINDUP_AUDIT.md](WINDUP_AUDIT.md) | Every requirement ID, M0 to M12: done, partial or missing, with a check command |
 | [WINDUP_SMOKE.md](WINDUP_SMOKE.md) | The live smoke test at the wind-up, and the clean-clone proof |
 | [DECISIONS.md](DECISIONS.md) | Decisions taken at the wind-up, with how to reverse each |

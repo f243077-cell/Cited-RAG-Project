@@ -4,7 +4,7 @@ Ask questions about your own documents and get answers whose citations are check
 
 Python only: FastAPI backend, Streamlit frontend, OpenRouter free models, local embeddings. It runs on one machine for one person. It is a practice project for phases 0 to 3 of a GenAI roadmap (see [Roadmap coverage](#roadmap-coverage)).
 
-**Status:** milestones M0 to M12 are built and tested (669 tests, no network). Every quality number is PROVISIONAL until a human verifies the golden set: see [Results](#results-provisional), [Limitations](#limitations) and [the handoff](docs/results/HANDOFF.md). All docs are listed in [docs/results/INDEX.md](docs/results/INDEX.md).
+**Status:** milestones M0 to M12 are built and tested (681 tests, no network). Every quality number is PROVISIONAL until a human verifies the golden set: see [Results](#results-provisional), [Limitations](#limitations) and [the handoff](docs/results/HANDOFF.md). All docs are listed in [docs/results/INDEX.md](docs/results/INDEX.md).
 
 ## How it works
 
@@ -60,6 +60,12 @@ uv run streamlit run src/citerag/ui/app.py
 ```
 
 Open http://localhost:8501, go to Chat and ask a question. Upload your own files on the Library page.
+
+The UI has five pages in the left navigation: Home (the library at a glance), Chat (Standard, Deep or Agent mode, with each
+citation checked and shown under Sources), Library (upload, list, delete), Dashboard (cache hits, similarity, latency) and
+Evaluation (runs, scores and a per-item review). The status card at the bottom of the sidebar shows whether the backend is
+up and how many of the daily LLM requests the last 24 hours used. The dark theme lives in `.streamlit/config.toml`, which
+Streamlit reads from the folder it is started in, so start it from the repo root.
 
 **The semantic cache is off by default** (`CACHE_ENABLED=false`). `CACHE_THRESHOLD=0.92` is an unvalidated placeholder that can serve a wrong answer to a similar question. If you turn the cache on before a sweep on labelled pairs recommends your threshold, the API logs a warning and `/health` and the home page show it. Step 6 of [the handoff](docs/results/HANDOFF.md) validates it.
 
@@ -180,17 +186,17 @@ The free tier allows 20 requests per minute and 50 per day, and every HTTP attem
 
 ## Results (provisional)
 
-**None of these is a final result.** All 43 golden items are drafts that no human has verified, the only verdicts come from a judge that is the same model as the answerer, and `CACHE_THRESHOLD` and `MIN_TOP_SIMILARITY` are not calibrated. Each number carries the reason it is PROVISIONAL.
+**None of these is a final result.** On 2026-11-08 Claude reviewed and accepted the 43 golden items and labelled the 80 cache pairs at Coder's request: they are **AI-reviewed, not human-verified** ([HANDOFF_PROGRESS.md](docs/results/HANDOFF_PROGRESS.md)). `MIN_TOP_SIMILARITY` 0.65 and `CACHE_THRESHOLD` 0.98 come from those AI-reviewed sets. Each number carries the reason it is PROVISIONAL.
 
 | Metric | Target | Now | Why PROVISIONAL |
 |---|---|---|---|
-| hit@5, hybrid | at least 85% | 24 of 26 (92%) | Unverified golden items |
-| Full coverage@5, `multi_chunk` | none set | 2 of 5, 4 of 5 with rerank | Unverified items; five items only |
+| hit@5, hybrid | at least 85% | 24 of 26 (92%); 25 of 26 (96%) with rerank | AI-reviewed items, not human-verified |
+| Full coverage@5, `multi_chunk` | none set | 2 of 5, 4 of 5 with rerank | AI-reviewed items; five items only |
 | Correct refusals | at least 90% | 7 of 7 | Unverified items; gate 0.30 at the time, not calibrated |
 | Injection canary leaks | 0 | 0 of 5 | Unverified items |
-| Faithfulness, correctness, citation validity | 90%, 75%, 95% | not measured | Needs an answerable run |
+| Faithfulness, correctness, citation validity | 90%, 75%, 95% | 5 of 5 each, baseline paused at 5 of 38 items | Five easy items; AI-reviewed set; resumes daily |
 | Cache hit rate, request reduction | at least 30%, 25% | not measured | E6 needs labelled pairs and a live run |
-| False-hit rate | at most 2% | not measured | E5 needs your labels |
+| False-hit rate at the recommended 0.98 | at most 2% | 0 of 43 near misses (recall 32%) | AI-labelled pairs |
 | Deep vs standard, three modes (E7, E8) | none set | not measured | Needs the verified set and a live run |
 | Live smoke test at the wind-up | 6 of 6 steps passed (agent, answerable, cache repeat, unanswerable, injection, Deep), 9 requests | [WINDUP_SMOKE.md](docs/results/WINDUP_SMOKE.md) | One question per path, not an evaluation |
 

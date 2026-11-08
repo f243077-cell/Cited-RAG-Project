@@ -8,6 +8,31 @@ step says otherwise (Chroma allows one writer).
 shows where you are. A capped run pauses cleanly and `--resume <run_id>` carries on the next day without paying twice
 (rehearsed in `tests/integration/test_handoff_tools.py`).
 
+## Status on 2026-11-08: steps 1 to 7 done by Claude, step 8 started
+
+You asked Claude to do this work and chose "AI review, labelled" (DECISIONS D-15). Steps 1 to 7 are done and every result is
+marked **AI-reviewed, not human-verified**: details and numbers in [HANDOFF_PROGRESS.md](HANDOFF_PROGRESS.md). You can still
+re-check any golden item or cache pair yourself and re-accept it with `--reviewed-by human`.
+
+**Three `.env` lines for you to set** (Claude does not edit your `.env`; the runs passed these as environment variables):
+
+```
+MIN_TOP_SIMILARITY=0.65
+MODEL_JUDGE=dots-studio/dots-3-note-preview:free
+# only matters if you also set CACHE_ENABLED=true
+CACHE_THRESHOLD=0.98
+```
+
+**Restart the API and the UI** after pulling: the running processes predate the `reviewed_by` field and the new UI theme.
+
+**Step 8 continues daily** until the run says `complete` (about 61 more requests; 35 a day leaves room for questions):
+
+```bash
+MODEL_JUDGE=dots-studio/dots-3-note-preview:free MIN_TOP_SIMILARITY=0.65 uv run citerag eval run --golden eval/golden/golden.jsonl --require-verified --index-dir data/index_eval --skip-type image --max-requests 35 --resume 20261108-144525-golden
+```
+
+(Once the three lines are in your `.env`, drop the two variables at the front.) Steps 9 to 11 follow, as in the table.
+
 | # | Step | Command | Minutes | LLM requests | Unlocks | Failure means |
 |---|---|---|---|---|---|---|
 | 1 | Build the evaluation index (once) | `uv run citerag ingest data/sample --index-dir data/index_eval`, then `uv run citerag ingest eval/fixtures/poisoned --index-dir data/index_eval` | 10 the first time (model download), 2 after | 0 (captions off) | Every evaluation command | A traceback, or `0 chunk(s)` for a PDF |
@@ -24,8 +49,8 @@ shows where you are. A capped run pauses cleanly and `--resume <run_id>` carries
 | 12 | Optional: run Docker yourself (already proven at the wind-up) | `docker compose up -d --build`, then `curl http://127.0.0.1:8000/health` and open http://127.0.0.1:8501; `docker compose down` to stop | 2 with the image already built; about 60 if `pyproject.toml` or `uv.lock` changed (21 GB, CUDA PyTorch) | 0 until you ask a question | Nothing new: F-OPS-4 passed on 2026-11-07 (WINDUP_SMOKE.md) | The backend never turns healthy (read `docker compose logs backend`) |
 
 **Your `.env`.** The code default for `CACHE_ENABLED` is `false`, and you set `CACHE_ENABLED=false` in your `.env` at the
-wind-up (the wind-up itself never edited it). Keep it off until step 6 validates the threshold. If you turn it on earlier, the API
-logs a warning at start and `/health` and the home page list it.
+wind-up (the wind-up itself never edited it). Step 6 now recommends `CACHE_THRESHOLD=0.98` from AI-labelled pairs, so if you turn
+the cache on, the API still warns until a human has checked the labels.
 
 **Money (your call, not done).** Steps 8 to 11 take two to three weeks at 35 requests a day. Buying at least 10 OpenRouter credits
 raises the free-model limit to 1,000 a day (PRD OPEN-5). Then set `MAX_REQUESTS_PER_DAY` higher, and the whole programme fits in a

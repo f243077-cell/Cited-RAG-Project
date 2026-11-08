@@ -238,6 +238,15 @@ No `anthropic` or `litellm` package. Embeddings are local, so they use no LLM re
 - **FastMCP logs every request at INFO** (`Processing request of type ...`). Over stdio, stdout is the protocol: send logs to stderr.
 - Free models expire: on 2026-11-07 OpenRouter's list showed `liquid/lfm-2.5-2.6b:free` expiring on 2026-11-13, and the day before it
   showed no expiry. Re-run `scripts/pick_free_models.py` before choosing a judge.
+- **`st.html` sanitises with DOMPurify:** inline `<svg>` and `target="_blank"` are removed, `<style>` survives. The UI icons
+  are CSS masks over data URIs (`ui/style.py`). Model output never goes through `st.html` (F-SAF-2).
+- **Streamlit reruns a changed page but does not reload an imported module** such as `ui/style.py` or `ui/common.py`, and
+  reads `.streamlit/config.toml` only at start: restart Streamlit after changing either. Start it from the repo root, or
+  the theme file is not found. The first direct load of `/chat` after a restart shows a harmless "Page not found" toast.
+- Streamlit 1.67: a keyed container gets the CSS class `st-key-<key>`; a widget's element container is only as wide as
+  its content, so a full-width control needs `[data-testid="stElementContainer"] { width: 100% }` in its keyed container.
+- **The Dockerfile copied `README.md` before the dependency layer**, so a README edit re-downloaded CUDA PyTorch (an hour).
+  Since 2026-11-08 only `pyproject.toml` and `uv.lock` come before `uv sync --no-install-project`.
 - Gemini's OpenAI endpoint returns errors as a list, `[{'error': {...}}]`, not an object; the SDK status code is still right.
 
 ## Conventions
